@@ -1,0 +1,111 @@
+{
+  "projectType": "saas",
+  "projectName": "Mórchlár",
+  "projectDescription": "Collaborative team project tracking platform with GitHub integration and timeline-based task management.",
+  "theme": "almond",
+  "primaryColor": "#3b82f6",
+  "lightColor": "#60a5fa",
+  "darkColor": "#2563eb",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/authentication",
+              "features/groups",
+              "features/projects",
+              "features/tasks"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/setup",
+              "guides/github-integration",
+              "guides/creating-groups",
+              "guides/managing-projects",
+              "guides/task-timeline"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/overview",
+              "deployment/environment-variables",
+              "deployment/database-setup"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "API Overview",
+            "pages": [
+              "api/overview",
+              "api/authentication"
+            ]
+          },
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/groups",
+              "api/projects",
+              "api/tasks",
+              "api/github"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Development",
+        "groups": [
+          {
+            "group": "Development Guide",
+            "pages": [
+              "development/getting-started",
+              "development/architecture",
+              "development/database-schema",
+              "development/contributing"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "GitHub OAuth authentication with repository access",
+    "Group-based team collaboration and membership management",
+    "Project tracking with GitHub repository integration",
+    "Visual timeline-based task management with date ranges",
+    "Role-based access control for groups and projects",
+    "Hierarchical task structure with parent-child relationships",
+    "Real-time task progress tracking and visualization",
+    "Database migrations with Drizzle ORM"
+  ],
+  "publicApiSurface": [
+    "POST /api/auth/[...all] - Authentication endpoints (GitHub OAuth)",
+    "GET /api/groups - List user's groups",
+    "POST /api/groups - Create new group",
+    "GET /api/groups/[id] - Get group details",
+    "GET /api/groups/[id]/members - List group members",
+    "POST /api/groups/[id]/members - Add member to group",
+    "GET /api/projects/[groupId] - List projects in group",
+    "POST /api/projects - Create new project",
+    "GET /api/project/[id] - Get project details",
+    "GET /api/tasks/[projectId] - List tasks for project",
+    "POST /api/tasks - Create new task",
+    "GET /api/github/repos - List accessible GitHub repositories"
+  ]
+}
