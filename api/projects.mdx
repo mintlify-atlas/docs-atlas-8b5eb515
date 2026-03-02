@@ -1,0 +1,279 @@
+---
+title: Projects API
+description: Create and manage projects linked to GitHub repositories
+---
+
+## Overview
+
+Projects in Mórchlár represent individual work initiatives tied to GitHub repositories. Each project belongs to a group and is linked to a specific GitHub repository.
+
+## Create a project
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://your-domain.com/api/projects \
+  -H "Content-Type: application/json" \
+  -H "Cookie: better_auth.session_token=your-token" \
+  -d '{
+    "title": "Website Redesign",
+    "groupId": 1,
+    "repo": "owner/repository-name",
+    "repoName": "repository-name",
+    "repoOwner": "owner"
+  }'
+```
+
+```json Response
+{
+  "id": 42
+}
+```
+</CodeGroup>
+
+Creates a new project and links it to a GitHub repository. The repository is validated to ensure the authenticated user has access.
+
+### Request body
+
+<ParamField body="title" type="string" required>
+  The project title. This is a human-readable name that can differ from the repository name.
+</ParamField>
+
+<ParamField body="groupId" type="number" required>
+  The ID of the group this project belongs to. You must be a member of this group.
+</ParamField>
+
+<ParamField body="repo" type="string" required>
+  The GitHub repository in `owner/name` format (e.g., `octocat/hello-world`). Used to verify repository access.
+</ParamField>
+
+<ParamField body="repoName" type="string" required>
+  The name of the GitHub repository.
+</ParamField>
+
+<ParamField body="repoOwner" type="string" required>
+  The owner (user or organization) of the GitHub repository.
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="number">
+  The unique identifier for the created project.
+</ResponseField>
+
+### Errors
+
+- `400 Bad Request` - Invalid repository or user doesn't have access to the repository
+- `401 Unauthorized` - User is not authenticated
+- `404 Not Found` - Group not found or user is not a member of the group
+- `500 Internal Server Error` - Database error or GitHub API error
+
+---
+
+## List group projects
+
+<CodeGroup>
+```bash cURL
+curl https://your-domain.com/api/projects/1 \
+  -H "Cookie: better_auth.session_token=your-token"
+```
+
+```json Response
+[
+  {
+    "id": 42,
+    "title": "Website Redesign",
+    "groupId": 1,
+    "repoId": 123456,
+    "repoName": "website",
+    "repoOwner": "mycompany",
+    "createdAt": "2026-01-15T10:30:00Z",
+    "updatedAt": "2026-01-15T10:30:00Z"
+  },
+  {
+    "id": 43,
+    "title": "Mobile App",
+    "groupId": 1,
+    "repoId": 789012,
+    "repoName": "mobile-app",
+    "repoOwner": "mycompany",
+    "createdAt": "2026-01-20T14:00:00Z",
+    "updatedAt": "2026-01-20T14:00:00Z"
+  }
+]
+```
+</CodeGroup>
+
+Returns all projects for a specific group. The authenticated user must be a member of the group.
+
+### Path parameters
+
+<ParamField path="groupId" type="number" required>
+  The unique identifier of the group.
+</ParamField>
+
+### Response
+
+Returns an array of project objects:
+
+<ResponseField name="id" type="number">
+  The unique identifier for the project.
+</ResponseField>
+
+<ResponseField name="title" type="string">
+  The project title.
+</ResponseField>
+
+<ResponseField name="groupId" type="number">
+  The ID of the group this project belongs to.
+</ResponseField>
+
+<ResponseField name="repoId" type="number">
+  The GitHub repository ID.
+</ResponseField>
+
+<ResponseField name="repoName" type="string">
+  The name of the GitHub repository.
+</ResponseField>
+
+<ResponseField name="repoOwner" type="string">
+  The owner of the GitHub repository.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  ISO 8601 timestamp of when the project was created.
+</ResponseField>
+
+<ResponseField name="updatedAt" type="string">
+  ISO 8601 timestamp of the last update to the project.
+</ResponseField>
+
+### Errors
+
+- `401 Unauthorized` - User is not authenticated
+- `404 Not Found` - Group not found or user is not a member
+
+---
+
+## Get project by ID
+
+<CodeGroup>
+```bash cURL
+curl https://your-domain.com/api/project/42 \
+  -H "Cookie: better_auth.session_token=your-token"
+```
+
+```json Response
+{
+  "id": 42,
+  "title": "Website Redesign",
+  "groupId": 1,
+  "repoId": 123456,
+  "repoName": "website",
+  "repoOwner": "mycompany",
+  "createdAt": "2026-01-15T10:30:00Z",
+  "updatedAt": "2026-01-15T10:30:00Z"
+}
+```
+</CodeGroup>
+
+Retrieves a specific project by ID. The user must have access through group membership.
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  The unique identifier of the project.
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="number">
+  The unique identifier for the project.
+</ResponseField>
+
+<ResponseField name="title" type="string">
+  The project title.
+</ResponseField>
+
+<ResponseField name="groupId" type="number">
+  The ID of the group this project belongs to.
+</ResponseField>
+
+<ResponseField name="repoId" type="number">
+  The GitHub repository ID.
+</ResponseField>
+
+<ResponseField name="repoName" type="string">
+  The name of the GitHub repository.
+</ResponseField>
+
+<ResponseField name="repoOwner" type="string">
+  The owner of the GitHub repository.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  ISO 8601 timestamp of when the project was created.
+</ResponseField>
+
+<ResponseField name="updatedAt" type="string">
+  ISO 8601 timestamp of the last update to the project.
+</ResponseField>
+
+### Errors
+
+- `401 Unauthorized` - User is not authenticated
+- `404 Not Found` - Project doesn't exist or user doesn't have access
+
+---
+
+## Get project members
+
+<CodeGroup>
+```bash cURL
+curl https://your-domain.com/api/projects/members/42 \
+  -H "Cookie: better_auth.session_token=your-token"
+```
+</CodeGroup>
+
+Retrieves repository collaborators from GitHub for the project. This endpoint is currently under development and returns collaborator data from the GitHub API.
+
+### Path parameters
+
+<ParamField path="projectId" type="number" required>
+  The unique identifier of the project.
+</ParamField>
+
+### Errors
+
+- `400 Bad Request` - Invalid project ID
+- `401 Unauthorized` - User is not authenticated or lacks GitHub access token
+- `404 Not Found` - Project not found
+
+---
+
+## Schema reference
+
+Projects are stored with the following schema:
+
+```typescript
+{
+  id: number;              // Auto-generated primary key
+  title: string;           // Project title (required)
+  groupId: number;         // Foreign key to groups table (required)
+  repoId: number;          // GitHub repository ID (required)
+  repoName: string;        // Repository name (required)
+  repoOwner: string;       // Repository owner (required)
+  createdAt: Date;         // Creation timestamp
+  updatedAt: Date;         // Last update timestamp
+}
+```
+
+## GitHub integration
+
+When creating a project, the API:
+
+1. Validates the repository using the GitHub API
+2. Verifies the user has access to the repository
+3. Extracts the repository ID, name, and owner
+4. Stores the repository information with the project
+
+The user's GitHub access token (obtained during OAuth authentication) is used for all GitHub API calls.

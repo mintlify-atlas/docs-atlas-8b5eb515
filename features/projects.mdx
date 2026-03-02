@@ -1,0 +1,266 @@
+---
+title: Projects
+description: Track projects with GitHub repository integration
+---
+
+Projects in Mórchlár are linked to GitHub repositories, enabling seamless integration between project planning and code development. Each project belongs to a group and contains timeline-based tasks.
+
+## Creating a project
+
+Projects are created within a group and connected to a GitHub repository:
+
+### User workflow
+
+1. Navigate to a group dashboard
+2. Click "New Project"
+3. Enter a project title
+4. Select a GitHub repository from your accessible repos
+5. Submit to create the project
+
+### GitHub repository selection
+
+The application fetches repositories the user has access to:
+
+```typescript
+const token = await getUserGitHubAuthToken(userId);
+const octokit = new Octokit({ auth: token });
+
+const { data: repos } = await octokit.rest.repos.listForAuthenticatedUser();
+
+const mappedRepos = repos.map((repo) => ({
+    owner: repo.owner.login,
+    name: repo.name,
+    icon: repo.owner.avatar_url,
+}));
+```
+
+This displays all repositories the authenticated user can access, including:
+- Personal repositories
+- Organization repositories they're a member of
+- Repositories they've been granted access to
+
+<Info>
+The `repo` OAuth scope grants access to private repositories, ensuring all relevant repos are available for project linking.
+</Info>
+
+## Project schema
+
+Projects store both project metadata and GitHub repository information:
+
+```typescript
+export const projects = pgTable("projects", {
+    id: serial("id").primaryKey(),
+    title: text("title").notNull(),
+    groupId: integer("group_id").notNull(),
+    repoId: integer("repo_id").notNull(),
+    repoName: text('repo_name').notNull(),
+    repoOwner: text('repo_owner').notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+        .$onUpdate(() => new Date())
+        .notNull(),
+});
+```
+
+- **title** - Display name of the project (can differ from repo name)
+- **groupId** - Reference to parent group
+- **repoId** - GitHub's numeric repository ID
+- **repoName** - Repository name (e.g., "my-app")
+- **repoOwner** - Repository owner username or organization
+
+<Note>
+Storing both the numeric `repoId` and text-based `repoName`/`repoOwner` enables efficient GitHub API calls without additional lookups.
+</Note>
+
+## Repository verification
+
+Before creating a project, the server verifies repository access:
+
+```typescript
+export async function verifyGitHubRepoAccess(
+    ghToken: string, 
+    fullRepo: string
+): Promise<{ valid: false } | { valid: true, id: number, name: string, owner: string }> {
+    const [ owner, repo ] = fullRepo.split('/');
+    if (!owner || !repo) throw Error('Invalid repo');
+
+    const octokit = new Octokit({ auth: ghToken });
+    const repoInfo = await octokit.rest.repos.get({ owner, repo });
+
+    if (!repoInfo.data) return { valid: false };
+
+    return {
+        valid: true,
+        id: repoInfo.data.id,
+        name: repo,
+        owner,
+    };
+}
+```
+
+This ensures:
+- Repository exists
+- User has access permissions
+- Repository data can be fetched
+
+If verification fails, the project creation is rejected:
+
+```typescript
+const repoStatus = await verifyGitHubRepoAccess(token, bodyData.repo);
+if (!repoStatus.valid) {
+    throw createError({
+        statusCode: 400,
+        statusMessage: 'Bad Request',
+        message: 'Invalid repo'
+    });
+}
+```
+
+## Project creation API
+
+The server-side handler creates projects with full validation:
+
+```typescript
+export default defineAuthenticatedEventHandler(async (event) => {
+    const userId = event.context.user.id;
+    const bodyData = await validateBody(event, ClientInsertProject);
+
+    // Verify user is in the group
+    await ensureUserInGroup(userId, bodyData.groupId);
+
+    // Validate GitHub repo access
+    const token = await getUserGitHubAuthToken(userId);
+    const repoStatus = await verifyGitHubRepoAccess(token, bodyData.repo);
+    
+    if (!repoStatus.valid) {
+        throw createError({
+            statusCode: 400,
+            statusMessage: 'Bad Request',
+            message: 'Invalid repo'
+        });
+    }
+    
+    const createdProjectId = await createProject(
+        repoStatus.id,
+        repoStatus.name,
+        repoStatus.owner,
+        bodyData.title,
+        bodyData.groupId
+    );
+
+    return { id: createdProjectId };
+})
+```
+
+### Validation steps
+
+1. **Authentication** - User must be logged in
+2. **Group membership** - User must be a member of the target group
+3. **Repository access** - User must have access to the specified GitHub repo
+4. **Data validation** - Request body must match the schema
+
+<Tip>
+All group members can create projects, not just owners. This encourages team collaboration and distributed project management.
+</Tip>
+
+## Client vs server schemas
+
+The project schema has two variants for different contexts:
+
+### Client schema
+
+Used in API requests from the frontend:
+
+```typescript
+export const ClientInsertProject = createInsertSchema(projects).omit({
+    id: true,
+    createdAt: true,
+    updatedAt: true,
+    repoId: true,
+}).extend({
+    repo: z.string(),
+});
+```
+
+Clients send the repository as a string (e.g., `"owner/repo-name"`) because:
+- It's easier to work with in the UI
+- The numeric repo ID requires an API call to obtain
+- The server can validate and fetch the ID
+
+### Server schema
+
+Used internally for database operations:
+
+```typescript
+export const InsertProject = createInsertSchema(projects).omit({
+    id: true,
+    createdAt: true,
+    updatedAt: true,
+});
+```
+
+The server schema includes `repoId` because the numeric ID is required for database storage.
+
+## Querying projects
+
+### List all projects in a group
+
+```typescript
+export async function listProjects(groupId: number) {
+    return await db.query.projects.findMany({
+        where: eq(projects.groupId, groupId),
+    });
+}
+```
+
+### Get a specific project with membership check
+
+```typescript
+export async function getUserProject(userId: string, projectId: number) {
+    const projectGroupInfo = await db.query.projects.findFirst({
+        where: eq(projects.id, projectId),
+        with: {
+            group: {
+                with: {
+                    members: {
+                        columns: {
+                            userId: true,
+                        }
+                    },
+                }
+            }
+        }
+    });
+
+    if (!projectGroupInfo) return null;
+
+    if (projectGroupInfo.group.members.find((m) => m.userId === userId)) {
+        return projectGroupInfo;
+    } else {
+        return null;
+    }
+}
+```
+
+This ensures users can only access projects from groups they belong to.
+
+<Accordion title="Future GitHub integration features">
+The repository connection enables future features like:
+
+- Automatic issue creation from tasks
+- Syncing task progress with pull requests
+- Displaying commit activity on the timeline
+- Linking tasks to specific GitHub issues or milestones
+
+The foundation is in place with stored repository metadata and OAuth token access.
+</Accordion>
+
+<Accordion title="Project permissions">
+Project access is determined by group membership:
+
+- **Group owners** - Full access to all projects in the group
+- **Group developers** - Can view, create, and modify projects
+- **Group readers** - Can view projects but not modify them
+
+Individual project-level permissions are not currently supported but could be added by extending the data model.
+</Accordion>

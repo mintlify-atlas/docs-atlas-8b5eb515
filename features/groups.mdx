@@ -1,0 +1,258 @@
+---
+title: Groups
+description: Organize teams and manage member permissions
+---
+
+Groups are the top-level organizational unit in Mórchlár. Each group contains members with assigned roles and can have multiple projects. Groups enable team collaboration with permission-based access control.
+
+## Creating a group
+
+When a user creates a group, they automatically become the owner:
+
+```typescript
+export async function createGroup(userId: string, groupName: string) {
+    const inserted = await db.insert(groups).values({
+        name: groupName,
+        slug: await findUniqueSlug(groupName),
+    }).returning();
+
+    const result = inserted[0];
+    if (inserted.length === 0 || !result) throw Error("Error creating group");
+
+    await db.insert(groupMembers).values({
+        groupId: result.id,
+        userId: userId,
+        role: 'owner',
+    });
+
+    return result.id;
+}
+```
+
+The group creation process:
+1. Generates a unique URL-friendly slug from the group name
+2. Inserts the group into the database
+3. Automatically adds the creator as the owner
+4. Returns the new group ID
+
+<Info>
+Group slugs are automatically generated from the group name and guaranteed to be unique. If a collision occurs, a random ID is appended.
+</Info>
+
+## Group schema
+
+Groups are stored with the following structure:
+
+```typescript
+export const groups = pgTable("groups", {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    slug: text("slug").notNull().unique(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+        .$onUpdate(() => new Date())
+        .notNull(),
+});
+```
+
+- **id** - Auto-incrementing primary key
+- **name** - Display name of the group
+- **slug** - Unique URL identifier
+- **createdAt** - Timestamp when group was created
+- **updatedAt** - Automatically updated on changes
+
+## Member roles
+
+Mórchlár supports three permission levels:
+
+```typescript
+export const groupRole = pgEnum('groupRole', ['owner', 'developer', 'reader']);
+```
+
+### Owner
+- Full administrative access
+- Can add and remove members
+- Can create and delete projects
+- Can modify group settings
+- Automatically assigned to group creator
+
+### Developer
+- Can create and modify tasks
+- Can view all projects
+- Can collaborate on group projects
+- Cannot manage group membership
+
+### Reader
+- Read-only access
+- Can view projects and tasks
+- Cannot create or modify content
+
+<Note>
+Currently, only owners can add new members to groups. Future versions may allow delegation of this permission.
+</Note>
+
+## Adding members to a group
+
+Owners can add members through the group members page:
+
+### UI workflow
+
+1. Navigate to the group members page
+2. Enter the GitHub username of the person to add
+3. Select their role (developer or reader)
+4. Submit the form
+
+```typescript
+async function addUserToGroup() {
+    const body: InsertGroupMember = {
+        groupId: Number(groupId.value),
+        userName: userName.value,
+        role: 'developer',
+    };
+
+    const result = await $csrfFetch('/api/groups/addUser', {
+        method: 'POST',
+        body,
+    });
+}
+```
+
+### Server-side validation
+
+The API performs several security checks:
+
+```typescript
+// Verify requestor is a group owner
+const requesteePermissions = await getUserGroupPermissions(userId, groupId);
+if (requesteePermissions.role !== 'owner') {
+    throw createError({
+        statusCode: 403,
+        statusMessage: 'Only owners can add members to groups.',
+    });
+}
+
+// Prevent adding users with owner role
+if (body.role !== "developer" && body.role !== "reader") {
+    throw createError({
+        statusCode: 409,
+        statusMessage: 'Owners cannot add users with higher or same permissions as them.'
+    })
+}
+
+// Verify user exists
+const userToAdd = await getUserByUsername(body.userName);
+if(!userToAdd) {
+    throw createError({
+        statusCode: 404,
+        statusMessage: "User not found",
+    });
+}
+
+// Check if already a member
+const toBeAddedInGroup = await getUserGroupPermissions(userToAdd.id, groupId);
+if (toBeAddedInGroup) {
+    throw createError({
+        statusCode: 409,
+        statusMessage: "User is already in this group",
+    });
+}
+```
+
+<Tip>
+Users must have logged into Mórchlár at least once before they can be added to a group, as the system looks up users by their GitHub username.
+</Tip>
+
+## Viewing group members
+
+The members page displays all group members with their roles:
+
+```vue
+<li 
+    v-for="member in groupMembers"
+    class="flex flex-row gap-2 items-center bg-main-800 p-2 rounded-md ring-md"
+    :key="member.user.id">
+    <img 
+        v-if="member.user.image"
+        class="size-8 rounded-full"
+        :src="member.user.image" 
+        :alt="`Profile picture for ${member.user.name}`">
+    <span class="text-txt-primary">
+        {{ member.user.name }}
+    </span>
+    <span>/</span>
+    <span class="capitalize">
+        {{ member.role }}
+    </span>
+</li>
+```
+
+Each member card shows:
+- GitHub avatar
+- Display name
+- Current role in the group
+
+## Group membership data model
+
+The relationship between users and groups:
+
+```typescript
+export const groupMembers = pgTable("groupMembers", {
+    groupId: integer("group_id").notNull().references(() => groups.id, { onDelete: 'cascade' }),
+    userId: text("user_id").notNull().references(() => user.id, { onDelete: 'cascade' }),
+    role: groupRole().notNull(),
+}, (table) => [
+    primaryKey({ columns: [ table.groupId, table.userId ] }),
+]);
+```
+
+Key features:
+- Composite primary key ensures each user can only be in a group once
+- Cascade deletion removes memberships when user or group is deleted
+- Role is required for every membership
+
+## Querying user groups
+
+Users can list all groups they belong to:
+
+```typescript
+export async function listUserGroups(userId: string) {
+    return await db.query.groupMembers.findMany({
+        where: eq(groupMembers.userId, userId),
+        with: {
+            group: {
+                columns: {
+                    name: true,
+                    slug: true,
+                }
+            },
+        }
+    });
+}
+```
+
+This returns group metadata for all memberships, useful for navigation and group selection in the dashboard.
+
+<Accordion title="Slug generation algorithm">
+The slug generation ensures uniqueness by checking existing groups and appending a nanoid if collisions occur:
+
+```typescript
+export async function findUniqueSlug(text: string) {
+    const slug = slugify(text);
+    let existing = !!(await findGroupBySlug(slug));
+
+    while (existing) {
+        const id = nanoid();
+        const idSlug = `${slug}-${id}`;
+        existing = !!(await findGroupBySlug(idSlug));
+
+        if (!existing) {
+            return idSlug;
+        }
+    }
+
+    return slug;
+}
+```
+
+This ensures that groups with similar names (e.g., "Engineering" and "engineering") get unique, URL-safe identifiers.
+</Accordion>

@@ -1,0 +1,337 @@
+---
+title: Groups API
+description: Manage groups and group memberships
+---
+
+## Overview
+
+Groups represent teams or organizations in Mórchlár. Each group can contain multiple members with different roles, and projects belong to groups.
+
+## Group roles
+
+Groups use a role-based permission system:
+
+- **owner** - Full control over the group, can add/remove members and manage projects
+- **developer** - Can create and manage projects within the group
+- **reader** - Read-only access to group projects
+
+## Create a group
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://your-domain.com/api/groups \
+  -H "Content-Type: application/json" \
+  -H "Cookie: better_auth.session_token=your-token" \
+  -d '{
+    "name": "My Team"
+  }'
+```
+
+```json Response
+{
+  "id": 1
+}
+```
+</CodeGroup>
+
+Creates a new group with the authenticated user as the owner. A URL-friendly slug is automatically generated from the group name.
+
+### Request body
+
+<ParamField body="name" type="string" required>
+  The name of the group. Must be unique across the platform.
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="number">
+  The unique identifier for the created group.
+</ResponseField>
+
+### Errors
+
+- `401 Unauthorized` - User is not authenticated
+- `500 Internal Server Error` - Database error or duplicate group name
+
+---
+
+## List user groups
+
+<CodeGroup>
+```bash cURL
+curl https://your-domain.com/api/groups \
+  -H "Cookie: better_auth.session_token=your-token"
+```
+
+```json Response
+[
+  {
+    "id": 1,
+    "name": "My Team",
+    "slug": "my-team",
+    "createdAt": "2026-01-15T10:30:00Z",
+    "updatedAt": "2026-01-15T10:30:00Z",
+    "role": "owner"
+  },
+  {
+    "id": 2,
+    "name": "Client Project",
+    "slug": "client-project",
+    "createdAt": "2026-01-20T14:00:00Z",
+    "updatedAt": "2026-01-20T14:00:00Z",
+    "role": "developer"
+  }
+]
+```
+</CodeGroup>
+
+Returns all groups where the authenticated user is a member, along with their role in each group.
+
+### Response
+
+Returns an array of group objects:
+
+<ResponseField name="id" type="number">
+  The unique identifier for the group.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  The group name.
+</ResponseField>
+
+<ResponseField name="slug" type="string">
+  URL-friendly identifier generated from the group name.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  ISO 8601 timestamp of when the group was created.
+</ResponseField>
+
+<ResponseField name="updatedAt" type="string">
+  ISO 8601 timestamp of the last update to the group.
+</ResponseField>
+
+<ResponseField name="role" type="string">
+  The user's role in this group: `owner`, `developer`, or `reader`.
+</ResponseField>
+
+### Errors
+
+- `401 Unauthorized` - User is not authenticated
+
+---
+
+## Get group by ID
+
+<CodeGroup>
+```bash cURL
+curl https://your-domain.com/api/groups/1 \
+  -H "Cookie: better_auth.session_token=your-token"
+```
+
+```json Response
+{
+  "id": 1,
+  "name": "My Team",
+  "slug": "my-team",
+  "createdAt": "2026-01-15T10:30:00Z",
+  "updatedAt": "2026-01-15T10:30:00Z",
+  "role": "owner"
+}
+```
+</CodeGroup>
+
+Retrieves a specific group by ID. The user must be a member of the group.
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  The unique identifier of the group.
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="number">
+  The unique identifier for the group.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  The group name.
+</ResponseField>
+
+<ResponseField name="slug" type="string">
+  URL-friendly identifier generated from the group name.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  ISO 8601 timestamp of when the group was created.
+</ResponseField>
+
+<ResponseField name="updatedAt" type="string">
+  ISO 8601 timestamp of the last update to the group.
+</ResponseField>
+
+<ResponseField name="role" type="string">
+  The authenticated user's role in this group: `owner`, `developer`, or `reader`.
+</ResponseField>
+
+### Errors
+
+- `401 Unauthorized` - User is not authenticated
+- `404 Not Found` - Group doesn't exist or user is not a member
+
+---
+
+## Add member to group
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://your-domain.com/api/groups/1/members \
+  -H "Content-Type: application/json" \
+  -H "Cookie: better_auth.session_token=your-token" \
+  -d '{
+    "userName": "johndoe",
+    "role": "developer"
+  }'
+```
+
+```json Response
+{
+  "groupId": 1,
+  "userId": "user_abc123",
+  "role": "developer"
+}
+```
+</CodeGroup>
+
+Adds a user to a group with the specified role. Only group owners can add members.
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  The unique identifier of the group.
+</ParamField>
+
+### Request body
+
+<ParamField body="userName" type="string" required>
+  The username of the user to add to the group.
+</ParamField>
+
+<ParamField body="role" type="string" required>
+  The role to assign: `developer` or `reader`. Owners cannot add users with the `owner` role.
+</ParamField>
+
+### Response
+
+<ResponseField name="groupId" type="number">
+  The group ID.
+</ResponseField>
+
+<ResponseField name="userId" type="string">
+  The user ID of the added member.
+</ResponseField>
+
+<ResponseField name="role" type="string">
+  The role assigned to the member.
+</ResponseField>
+
+### Errors
+
+- `401 Unauthorized` - User is not authenticated
+- `403 Forbidden` - Only owners can add members to groups
+- `404 Not Found` - Group or user not found
+- `409 Conflict` - User is already a member of the group, or attempting to assign owner role
+
+---
+
+## List group members
+
+<CodeGroup>
+```bash cURL
+curl https://your-domain.com/api/groups/1/members \
+  -H "Cookie: better_auth.session_token=your-token"
+```
+
+```json Response
+[
+  {
+    "userId": "user_abc123",
+    "name": "Jane Smith",
+    "email": "jane@example.com",
+    "image": "https://avatars.githubusercontent.com/u/123",
+    "role": "owner"
+  },
+  {
+    "userId": "user_def456",
+    "name": "John Doe",
+    "email": "john@example.com",
+    "image": "https://avatars.githubusercontent.com/u/456",
+    "role": "developer"
+  }
+]
+```
+</CodeGroup>
+
+Returns all members of a group. The authenticated user must be a member of the group.
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  The unique identifier of the group.
+</ParamField>
+
+### Response
+
+Returns an array of member objects:
+
+<ResponseField name="userId" type="string">
+  The unique identifier of the user.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  The user's display name.
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  The user's email address.
+</ResponseField>
+
+<ResponseField name="image" type="string">
+  URL to the user's profile image.
+</ResponseField>
+
+<ResponseField name="role" type="string">
+  The member's role in the group: `owner`, `developer`, or `reader`.
+</ResponseField>
+
+### Errors
+
+- `401 Unauthorized` - User is not authenticated
+- `404 Not Found` - Group not found or user is not a member
+
+---
+
+## Schema reference
+
+Groups are stored with the following schema:
+
+```typescript
+{
+  id: number;              // Auto-generated primary key
+  name: string;            // Group name (required)
+  slug: string;            // URL-friendly identifier (auto-generated, unique)
+  createdAt: Date;         // Creation timestamp
+  updatedAt: Date;         // Last update timestamp
+}
+```
+
+Group memberships link users to groups:
+
+```typescript
+{
+  groupId: number;         // Foreign key to groups table
+  userId: string;          // Foreign key to user table
+  role: 'owner' | 'developer' | 'reader';  // Member role
+}
+```

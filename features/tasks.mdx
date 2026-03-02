@@ -1,0 +1,319 @@
+---
+title: Tasks
+description: Timeline-based task management with hierarchical structure
+---
+
+Tasks are the core planning unit in Mórchlár. They represent work items with defined start and end times, displayed on an interactive timeline. Tasks can have parent-child relationships for breaking down complex work.
+
+## Task structure
+
+Each task has temporal and organizational properties:
+
+```typescript
+export const tasks = pgTable("tasks", {
+    id: serial("id").primaryKey(),
+    title: text("title").notNull(),
+    description: text("description"),
+
+    projectId: integer('project_id').references(() => projects.id, { onDelete: 'cascade' }).notNull(),
+    parentId: integer('parent_id').references((): AnyPgColumn => tasks.id, { onDelete: 'cascade' }),
+
+    startTime: timestamp('start_time').notNull(),
+    endTime: timestamp('end_time').notNull(),
+    progress: real('progress').default(0), // 0.00 to 1.00 as %
+
+    order: integer('order').default(0), // Order as sibling
+
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+        .$onUpdate(() => new Date())
+        .notNull(),
+});
+```
+
+### Key fields
+
+- **title** - Short description of the task
+- **description** - Detailed information about the work
+- **projectId** - Reference to parent project
+- **parentId** - Optional reference to parent task (for subtasks)
+- **startTime** - When the task begins
+- **endTime** - When the task is expected to complete
+- **progress** - Completion percentage (0.0 to 1.0)
+- **order** - Position relative to sibling tasks
+
+<Info>
+Tasks cascade delete when their project is removed, ensuring data consistency.
+</Info>
+
+## Creating tasks
+
+Users create tasks through an interactive dialog on the project page:
+
+### UI workflow
+
+1. Navigate to a project
+2. Click "New Task" button
+3. Fill in task details:
+   - Title
+   - Description
+   - Date range (start and end dates)
+4. Submit to create the task
+
+```typescript
+async function addTask() {
+    if (!taskName.value || !taskDesc.value || !dateValue.value || !projectId.value) return;
+    if (isNaN(Number(projectId.value))) return;
+    if (!dateValue.value.start || !dateValue.value.end) return;
+
+    const startDate = new Date(
+        dateValue.value.start.year, 
+        dateValue.value.start.month - 1,
+        dateValue.value.start.day, 
+    );
+
+    const endDate = new Date(
+        dateValue.value.end.year, 
+        dateValue.value.end.month - 1, 
+        dateValue.value.end.day, 
+    );
+
+    const body: InsertTaskSchema = {
+        title: taskName.value,
+        projectId: Number(projectId.value.toString()),
+        startTime: startDate,
+        endTime: endDate,
+        description: taskDesc.value,
+    };
+
+    const result = await $csrfFetch(`/api/tasks`, { method: "POST", body });
+
+    if (result.id) {
+        renderTask(startDate, endDate, taskName.value, result.id);
+    } else {
+        alert('Failed to add task');
+    }
+}
+```
+
+### Server-side creation
+
+The API handler validates and inserts the task:
+
+```typescript
+export default defineAuthenticatedEventHandler(async (event) => {
+    const body = await validateBody(event, InsertTask);
+
+    const result = await createTask(body);
+    if (!result[0] || !result[0].id) {
+        throw createError({
+            statusCode: 400,
+            statusMessage: "Bad Request",
+            message: "There was a problem inserting task into table."
+        });
+    }
+
+    return { id: result[0].id };
+});
+```
+
+<Note>
+Date values are preprocessed to convert string inputs into proper Date objects before database insertion.
+</Note>
+
+## Timeline visualization
+
+Tasks are displayed on an interactive timeline using [vue-timeline-chart](https://laurens94.github.io/vue-timeline-chart/):
+
+```typescript
+const items = computed<TimelineItem[]>(() => {
+    if (!tasksInfo.value) return [];
+    
+    return tasksInfo.value.map((task) => {
+        return {
+            id: task.id.toString(),
+            group: `${task.id}-group`,
+            type: 'range',
+            start: new Date(task.startTime).getTime(),
+            end: new Date(task.endTime).getTime()
+        }
+    })
+});
+
+const groups = computed<TimelineGroup[]>(() => {
+    if (!tasksInfo.value) return [];
+
+    return tasksInfo.value.map((task) => {
+        return {
+            id: `${task.id}-group`,
+            label: task.title,
+        }
+    })
+});
+```
+
+### Timeline features
+
+- **Interactive zooming** - Scroll to zoom in/out
+- **Panning** - Drag to move along the timeline
+- **Time range bars** - Visual representation of task duration
+- **Automatic viewport** - Calculates optimal view range based on tasks
+
+```typescript
+const PADDING_MS = 604800000; // 1 week padding
+
+const bounds = computed<{ lower: number, upper: number }>(() => {
+    const defaultValues = {
+        lower: Date.now() - 2629800000, // 1 month ago
+        upper: Date.now() + 2629800000   // 1 month ahead
+    };
+
+    if (!items.value || !items.value[0]) return defaultValues;
+
+    const lowest = items.value.reduce((lowest, item) => 
+        item.start < lowest.start ? item : lowest, items.value[0]);
+    const highest = items.value.reduce((highest, item) => 
+        item.start > highest.start ? item : highest, items.value[0]);
+    
+    return {
+        lower: lowest.start - PADDING_MS,
+        upper: (highest.end ?? defaultValues.upper) + PADDING_MS,
+    };
+});
+```
+
+The timeline automatically adjusts to show all tasks with padding for context.
+
+<Tip>
+The timeline component is fully responsive and touch-enabled, working seamlessly on mobile devices.
+</Tip>
+
+## Hierarchical tasks (subtasks)
+
+Tasks support parent-child relationships for breaking down complex work:
+
+```typescript
+export const taskRelations = relations(tasks, ({ one, many }) => ({
+    project: one(projects, {
+        fields: [tasks.projectId],
+        references: [projects.id],
+    }),
+    parent: one(tasks, {
+        fields: [tasks.parentId],
+        references: [tasks.id],
+        relationName: 'subtasks',
+    }),
+    subtasks: many(tasks, {
+        relationName: 'subtasks',
+    }),
+}));
+```
+
+This enables:
+- Breaking large tasks into smaller pieces
+- Organizing related work hierarchically
+- Tracking progress at multiple levels
+
+### Recursive task queries
+
+Fetching tasks with their hierarchy uses a recursive CTE:
+
+```typescript
+export async function getTasks(projectId: number): Promise<(TasksSchema & { depth: number, path: number[] })[]> {
+    const result = await db.execute(sql`
+        WITH RECURSIVE task_tree AS (
+            -- top-level tasks
+            SELECT *, 0 AS depth, ARRAY[id] AS path
+            FROM tasks
+            WHERE parent_id is NULL AND project_id = ${projectId}
+
+            UNION ALL
+
+            -- recurse children
+            SELECT t.*, tt.depth + 1, tt.path || t.id
+            FROM tasks t
+            INNER JOIN task_tree tt ON t.parent_id = tt.id
+        )
+        SELECT * FROM task_tree
+        ORDER BY path
+    `);
+
+    return result.rows.map((row) => 
+        mapKeys<(TasksSchema & { depth: number, path: number[] })>(row)
+    );
+}
+```
+
+This query:
+1. Starts with top-level tasks (no parent)
+2. Recursively finds children at each depth
+3. Tracks depth level and hierarchical path
+4. Orders by path for proper tree structure
+
+<Accordion title="Understanding the path array">
+The `path` field is an array of task IDs representing the full ancestry:
+
+- Task 1 (top-level): `path = [1]`
+- Task 2 (child of 1): `path = [1, 2]`
+- Task 3 (child of 2): `path = [1, 2, 3]`
+- Task 4 (top-level): `path = [4]`
+
+Ordering by path ensures tasks appear in hierarchical order, with children immediately following their parents.
+</Accordion>
+
+## Task progress tracking
+
+The `progress` field stores completion percentage:
+
+```typescript
+progress: real('progress').default(0), // 0.00 to 1.00 as %
+```
+
+Values range from:
+- `0.0` - Not started
+- `0.5` - 50% complete
+- `1.0` - Fully complete
+
+<Note>
+Progress tracking is manual. Future versions may automatically calculate parent task progress based on subtask completion.
+</Note>
+
+## Date preprocessing
+
+Date inputs from the client are preprocessed into Date objects:
+
+```typescript
+const preprocessDate = z.preprocess((value) => {   
+    // Since we submit the values as a date string, but we need
+    // to format them into a Date instance back on the server, just
+    // throw it into a new Date
+    if (typeof value === 'string' && value.trim() !== '') return new Date(value);       
+                                                                                                      
+    return value;                                                                                                                                                                    
+}, z.date());
+
+export const InsertTask = createInsertSchema(tasks, {
+    startTime: () => preprocessDate,
+    endTime: () => preprocessDate,
+}).omit({
+    id: true,
+    createdAt: true,
+    updatedAt: true,
+});
+```
+
+This ensures date strings from JSON are properly converted before database insertion.
+
+<Accordion title="Task ordering">
+The `order` field enables custom sorting of sibling tasks:
+
+```typescript
+order: integer('order').default(0), // Order as sibling
+```
+
+Tasks with the same parent can be reordered by updating their `order` value. Lower numbers appear first. This allows:
+
+- Manual prioritization within a parent task
+- Drag-and-drop reordering in the UI (future feature)
+- Preserving user-defined task sequences
+</Accordion>

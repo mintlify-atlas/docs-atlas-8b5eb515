@@ -1,0 +1,151 @@
+---
+title: Authentication
+description: Authenticate API requests using session tokens from Better Auth
+---
+
+## Overview
+
+Mórchlár uses [Better Auth](https://www.better-auth.com/) for authentication. All API endpoints except the authentication handlers require a valid session token.
+
+## Authentication flow
+
+The authentication system supports OAuth authentication via GitHub:
+
+1. User initiates sign-in through the GitHub OAuth provider
+2. Better Auth handles the OAuth flow and creates a session
+3. Session token is stored in a secure HTTP-only cookie
+4. API requests include the session cookie for authentication
+
+## GitHub OAuth setup
+
+Better Auth is configured to use GitHub as the OAuth provider with the following scopes:
+
+- `user:email` - Access to user email address
+- `repo` - Full control of private repositories (required for GitHub integration features)
+
+### Environment variables
+
+Configure these environment variables for GitHub OAuth:
+
+```bash
+GITHUB_CLIENT_ID=your-github-client-id
+GITHUB_CLIENT_SECRET=your-github-client-secret
+BETTER_AUTH_URL=http://localhost:3000
+BETTER_AUTH_SECRET=supersecretpassword
+```
+
+## Making authenticated requests
+
+### Using cookies (recommended)
+
+When making requests from a web browser or a client that supports cookies, the session token is automatically included:
+
+```bash
+curl https://your-domain.com/api/groups \
+  -H "Cookie: better_auth.session_token=your-session-token"
+```
+
+### Session token format
+
+The session token is stored as a cookie named `better_auth.session_token`. The token is validated on each request to ensure:
+
+- The session exists in the database
+- The session has not expired
+- The associated user account is valid
+
+## User context
+
+Once authenticated, all API handlers receive the user context:
+
+```typescript
+event.context.user // User object with id, name, email, etc.
+```
+
+The user ID is used to:
+- Verify group membership
+- Validate project access
+- Associate created resources with the user
+- Check permissions for modifying resources
+
+## Authentication endpoints
+
+Authentication is handled by Better Auth at:
+
+```
+POST /api/auth/sign-in/social
+GET  /api/auth/callback/github
+POST /api/auth/sign-out
+GET  /api/auth/get-session
+```
+
+These endpoints are managed by Better Auth. Refer to the [Better Auth documentation](https://www.better-auth.com/docs) for detailed usage.
+
+## Handling authentication errors
+
+### 401 Unauthorized
+
+All protected endpoints return a `401 Unauthorized` error if the request lacks a valid session token:
+
+```json
+{
+  "statusCode": 401,
+  "statusMessage": "Unauthorized"
+}
+```
+
+When you receive this error:
+1. Verify the session cookie is included in the request
+2. Check that the session has not expired
+3. Re-authenticate if necessary
+
+### 403 Forbidden
+
+Permission-related errors return `403 Forbidden` when the user is authenticated but lacks permission:
+
+```json
+{
+  "statusCode": 403,
+  "statusMessage": "Only owners can add members to groups."
+}
+```
+
+## GitHub token access
+
+When users authenticate via GitHub, their GitHub access token is stored securely and can be used to:
+
+- List accessible GitHub repositories
+- Verify repository access when creating projects
+- Fetch repository data and issues
+
+The API automatically retrieves the user's GitHub token when needed for GitHub integration endpoints.
+
+## Best practices
+
+<AccordionGroup>
+  <Accordion title="Store tokens securely">
+    Always store session tokens securely. Use HTTP-only cookies when possible to prevent XSS attacks.
+  </Accordion>
+  
+  <Accordion title="Handle token expiration">
+    Implement token refresh logic to handle expired sessions gracefully. Redirect users to sign in again when sessions expire.
+  </Accordion>
+  
+  <Accordion title="Use HTTPS in production">
+    Always use HTTPS in production to protect session tokens from interception.
+  </Accordion>
+  
+  <Accordion title="Minimize token exposure">
+    Never log or expose session tokens in client-side code or error messages.
+  </Accordion>
+</AccordionGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Groups API" icon="users" href="/api/groups">
+    Start managing groups with authenticated requests
+  </Card>
+  <Card title="GitHub Integration" icon="github" href="/api/github">
+    Connect and interact with GitHub repositories
+  </Card>
+</CardGroup>

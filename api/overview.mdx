@@ -1,0 +1,115 @@
+---
+title: API overview
+description: Learn about the Mórchlár REST API, authentication, and general concepts
+---
+
+## Introduction
+
+The Mórchlár API is a RESTful API that allows you to manage groups, projects, tasks, and GitHub integrations programmatically. All API endpoints require authentication unless otherwise specified.
+
+## Base URL
+
+The API base URL depends on your deployment:
+
+```
+Production: https://your-domain.com/api
+Development: http://localhost:3000/api
+```
+
+All endpoints described in this documentation are relative to this base URL.
+
+## Request format
+
+The API accepts JSON-encoded request bodies. Always include the `Content-Type: application/json` header in your requests.
+
+```bash
+curl -X POST https://your-domain.com/api/groups \
+  -H "Content-Type: application/json" \
+  -H "Cookie: better_auth.session_token=your-session-token" \
+  -d '{"name":"My Team"}'
+```
+
+## Response format
+
+All responses are returned as JSON. Successful responses return a `200` status code with the requested data.
+
+### Success response
+
+```json
+{
+  "id": 1,
+  "name": "My Team",
+  "slug": "my-team",
+  "createdAt": "2026-01-15T10:30:00Z",
+  "updatedAt": "2026-01-15T10:30:00Z"
+}
+```
+
+### Error response
+
+Error responses include a status code, status message, and optional error details:
+
+```json
+{
+  "statusCode": 404,
+  "statusMessage": "Not found",
+  "message": "You are not a part of any groups with that ID."
+}
+```
+
+## Common error codes
+
+<ResponseField name="400" type="Bad Request">
+  The request was malformed or missing required parameters.
+</ResponseField>
+
+<ResponseField name="401" type="Unauthorized">
+  Authentication is required. You must be logged in to access this endpoint.
+</ResponseField>
+
+<ResponseField name="403" type="Forbidden">
+  You don't have permission to perform this action.
+</ResponseField>
+
+<ResponseField name="404" type="Not Found">
+  The requested resource was not found or you don't have access to it.
+</ResponseField>
+
+<ResponseField name="409" type="Conflict">
+  The request conflicts with the current state (e.g., duplicate entry).
+</ResponseField>
+
+<ResponseField name="500" type="Internal Server Error">
+  An unexpected error occurred on the server.
+</ResponseField>
+
+## Data types
+
+The API uses standard JSON data types:
+
+- **String**: Text values (e.g., `"My Team"`)
+- **Number**: Integer or decimal values (e.g., `42`, `0.5`)
+- **Boolean**: `true` or `false`
+- **Date**: ISO 8601 timestamp strings (e.g., `"2026-01-15T10:30:00Z"`)
+- **Null**: Represents absence of a value
+
+## Rate limiting
+
+Currently, there are no rate limits enforced on the API. This may change in future releases.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="lock" href="/api/authentication">
+    Learn how to authenticate your API requests
+  </Card>
+  <Card title="Groups API" icon="users" href="/api/groups">
+    Manage teams and group memberships
+  </Card>
+  <Card title="Projects API" icon="folder" href="/api/projects">
+    Create and manage projects
+  </Card>
+  <Card title="Tasks API" icon="check" href="/api/tasks">
+    Work with tasks and subtasks
+  </Card>
+</CardGroup>

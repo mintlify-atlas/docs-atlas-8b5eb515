@@ -1,0 +1,365 @@
+---
+title: Architecture
+description: Understanding Mórchlár's system architecture and technology stack
+---
+
+Mórchlár is a full-stack project management application built with modern web technologies. This document provides an overview of the system architecture, tech stack, and key design decisions.
+
+## Tech stack
+
+### Frontend
+
+- **[Nuxt 4](https://nuxt.com/)** - Vue.js meta-framework for server-side rendering and routing
+- **[Vue 3](https://vuejs.org/)** - Progressive JavaScript framework for building user interfaces
+- **[Tailwind CSS 4](https://tailwindcss.com/)** - Utility-first CSS framework
+- **[Reka UI](https://reka-ui.com/)** - Accessible component library for Vue
+- **[Pinia](https://pinia.vuejs.org/)** - State management for Vue
+- **[Nuxt Icon](https://nuxt.com/modules/icon)** - Icon integration with Iconify
+- **[vue-timeline-chart](https://github.com/zyt155/vue-timeline-chart)** - Timeline visualization component
+
+### Backend
+
+- **[Nuxt Server](https://nuxt.com/docs/guide/directory-structure/server)** - Built-in server engine with API routes
+- **[better-auth](https://better-auth.com/)** - Type-safe authentication library
+- **[Drizzle ORM](https://orm.drizzle.team/)** - TypeScript ORM for PostgreSQL
+- **[PostgreSQL](https://www.postgresql.org/)** - Primary database (via Neon serverless)
+- **[Zod](https://zod.dev/)** - TypeScript-first schema validation
+
+### Authentication & Security
+
+- **[better-auth](https://better-auth.com/)** - Handles user authentication with GitHub OAuth
+- **[nuxt-csurf](https://nuxt.com/modules/csurf)** - CSRF protection middleware
+- **Session-based authentication** - Secure session management with database persistence
+
+### External integrations
+
+- **[GitHub API](https://docs.github.com/en/rest)** via [Octokit](https://github.com/octokit/octokit.js) - Repository integration and OAuth
+
+### Development tools
+
+- **[TypeScript](https://www.typescriptlang.org/)** - Type-safe JavaScript
+- **[Drizzle Kit](https://orm.drizzle.team/kit-docs/overview)** - Database migration tool
+- **[Bun](https://bun.sh/)** - Fast JavaScript runtime and package manager
+
+## Architecture overview
+
+Mórchlár follows a modern full-stack architecture with clear separation between client and server concerns:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Client Layer                         │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
+│  │   Vue Pages  │  │  Components  │  │ Pinia Stores │  │
+│  └──────────────┘  └──────────────┘  └──────────────┘  │
+│         │                  │                  │          │
+│         └──────────────────┴──────────────────┘          │
+│                          │                               │
+└──────────────────────────┼───────────────────────────────┘
+                           │ (API Calls)
+┌──────────────────────────┼───────────────────────────────┐
+│                    Server Layer                          │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
+│  │  API Routes  │  │  Middleware  │  │    Utils     │  │
+│  └──────────────┘  └──────────────┘  └──────────────┘  │
+│         │                  │                  │          │
+│         └──────────────────┴──────────────────┘          │
+│                          │                               │
+└──────────────────────────┼───────────────────────────────┘
+                           │
+┌──────────────────────────┼───────────────────────────────┐
+│                   Data Layer                             │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
+│  │ Drizzle ORM  │  │  DB Queries  │  │    Schema    │  │
+│  └──────────────┘  └──────────────┘  └──────────────┘  │
+│         │                                                │
+│         ▼                                                │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │         PostgreSQL Database (Neon)               │  │
+│  └──────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────┐
+│              External Services                           │
+│  ┌──────────────┐  ┌──────────────┐                     │
+│  │  GitHub API  │  │  GitHub OAuth│                     │
+│  └──────────────┘  └──────────────┘                     │
+└─────────────────────────────────────────────────────────┘
+```
+
+## Directory structure
+
+### App directory (`app/`)
+
+The `app/` directory contains all client-side Vue application code:
+
+```
+app/
+├── assets/
+│   └── css/
+│       └── main.css          # Global styles and Tailwind imports
+├── components/
+│   ├── App/                  # Application-level components
+│   │   ├── Dialog.vue
+│   │   └── Form/
+│   │       └── Input.vue
+│   ├── Button/               # Button variants
+│   │   ├── Primary.vue
+│   │   ├── Secondary.vue
+│   │   └── Tertiary.vue
+│   ├── Date/
+│   │   └── Picker.vue
+│   ├── Group/                # Group-related components
+│   │   ├── RepoSelector.vue
+│   │   └── Sidebar.vue
+│   ├── Project/              # Project-related components
+│   │   └── Sidebar.vue
+│   ├── Sidebar/
+│   │   └── Link.vue
+│   └── User/
+│       └── Sidebar.vue
+├── composables/
+│   └── auth.ts               # Authentication composable
+├── layouts/
+│   ├── dashboard.vue         # Dashboard layout with sidebar
+│   └── default.vue           # Default layout
+├── pages/
+│   ├── index.vue             # Landing page
+│   └── dashboard/
+│       ├── index.vue         # Dashboard home
+│       ├── settings.vue      # User settings
+│       └── group/
+│           └── [groupId]/
+│               ├── index.vue          # Group overview
+│               ├── members.vue        # Group members
+│               ├── settings.vue       # Group settings
+│               └── project/
+│                   └── [projectId]/
+│                       ├── index.vue      # Project tasks
+│                       └── settings.vue   # Project settings
+├── plugins/
+│   └── auth.ts               # Better Auth client plugin
+└── stores/
+    └── groups.ts             # Group state management
+```
+
+### Library directory (`lib/`)
+
+The `lib/` directory contains core shared code:
+
+```
+lib/
+├── auth.ts                   # Better Auth server configuration
+├── env.ts                    # Environment variable validation
+└── db/
+    ├── index.ts              # Drizzle database client
+    ├── migrations/           # Generated database migrations
+    ├── queries/              # Typed database queries
+    │   ├── auth.ts
+    │   ├── groups.ts
+    │   ├── projects.ts
+    │   └── tasks.ts
+    └── schema/               # Drizzle schema definitions
+        ├── index.ts
+        ├── auth.ts           # User, session, account tables
+        ├── groups.ts         # Groups table
+        ├── groupMembers.ts   # Group membership table
+        ├── projects.ts       # Projects table
+        └── tasks.ts          # Tasks table
+```
+
+### Server directory (`server/`)
+
+The `server/` directory contains Nuxt server code:
+
+```
+server/
+├── api/
+│   ├── auth/                 # Better Auth API routes
+│   ├── github/               # GitHub API integration
+│   ├── groups/               # Group management endpoints
+│   │   └── [id]/
+│   ├── project/              # Single project endpoints
+│   ├── projects/             # Projects collection endpoints
+│   │   └── members/
+│   └── tasks/                # Task management endpoints
+├── middleware/               # Server middleware
+└── utils/                    # Server utility functions
+```
+
+## Key design patterns
+
+### Database schema organization
+
+The database schema is organized into logical domains:
+
+- **Authentication** (`lib/db/schema/auth.ts`) - User accounts, sessions, OAuth
+- **Groups** (`lib/db/schema/groups.ts`) - Team/organization structure
+- **Group members** (`lib/db/schema/groupMembers.ts`) - Group membership and roles
+- **Projects** (`lib/db/schema/projects.ts`) - GitHub repository-linked projects
+- **Tasks** (`lib/db/schema/tasks.ts`) - Project tasks with hierarchical structure
+
+Each schema file exports:
+- Table definitions using Drizzle ORM
+- Relations for joins and nested queries
+- Zod validation schemas for insert operations
+- TypeScript types inferred from schemas
+
+Example from `lib/db/schema/groups.ts:21-28`:
+
+```typescript
+export const InsertGroup = createInsertSchema(groups).omit({
+    id: true,
+    slug: true,
+    createdAt: true,
+    updatedAt: true,
+});
+
+export type GroupSchema = typeof groups.$inferSelect;
+```
+
+### Type-safe database queries
+
+All database queries are centralized in `lib/db/queries/` with full TypeScript inference:
+
+- Reusable query functions
+- Type-safe parameters and return values
+- Consistent error handling
+- Optimized joins and relations
+
+### Authentication flow
+
+1. User clicks "Sign in with GitHub" on landing page
+2. Redirected to GitHub OAuth authorization
+3. GitHub redirects back to `/api/auth/callback/github`
+4. better-auth creates/updates user and session in database
+5. Session token stored in secure HTTP-only cookie
+6. Client uses `useAuth()` composable to access user state
+7. Server API routes validate session via middleware
+
+### State management
+
+Mórchlár uses a hybrid approach:
+
+- **Pinia stores** (`app/stores/`) for complex client state (e.g., groups)
+- **Vue composables** (`app/composables/`) for shared logic (e.g., auth)
+- **Server state** via API calls - no heavy client-side caching
+
+### API route structure
+
+API routes follow RESTful conventions:
+
+- `GET /api/groups` - List all groups
+- `POST /api/groups` - Create a new group
+- `GET /api/groups/[id]` - Get specific group
+- `PATCH /api/groups/[id]` - Update group
+- `DELETE /api/groups/[id]` - Delete group
+
+### Component organization
+
+Components are organized by domain:
+
+- Generic UI components: `App/`, `Button/`, `Date/`
+- Domain components: `Group/`, `Project/`, `User/`
+- Auto-imported by Nuxt - no manual imports needed
+
+## Configuration files
+
+### `nuxt.config.ts`
+
+Main Nuxt configuration at `nuxt.config.ts:4-18`:
+
+```typescript
+export default defineNuxtConfig({
+    compatibilityDate: '2025-07-15',
+    devtools: { enabled: false },
+    modules: ['nuxt-csurf', '@pinia/nuxt', 'reka-ui/nuxt', '@nuxt/icon'],
+    vite: {
+        plugins: [
+            tailwindcss()
+        ],
+    },
+    css: [ '~/assets/css/main.css' ],
+    routeRules: {
+        '/dashboard/**': { appLayout: 'dashboard' },
+    },
+});
+```
+
+### `drizzle.config.ts`
+
+Drizzle ORM configuration at `drizzle.config.ts:5-13`:
+
+```typescript
+export default defineConfig({
+    out: './lib/db/migrations',
+    schema: './lib/db/schema',
+    casing: 'snake_case',
+    dialect: 'postgresql',
+    dbCredentials: {
+        url: env.DATABASE_URL,
+    },
+});
+```
+
+## Database connection
+
+Mórchlár uses Neon's serverless PostgreSQL driver for optimal performance in serverless environments.
+
+From `lib/db/index.ts:7-12`:
+
+```typescript
+const sql = neon(env.DATABASE_URL);
+const db = drizzle({ 
+    client: sql,
+    casing: 'snake_case',
+    schema,
+});
+```
+
+Key features:
+- Serverless-ready with connection pooling
+- Automatic snake_case conversion for database columns
+- Full schema inference for type safety
+
+## Authentication configuration
+
+better-auth is configured in `lib/auth.ts:8-32`:
+
+```typescript
+export const auth = betterAuth({
+    database: drizzleAdapter(db, {
+        provider: 'pg',
+        schema,
+    }),
+    socialProviders: {
+        github: {
+            clientId: env.GITHUB_CLIENT_ID,
+            clientSecret: env.GITHUB_CLIENT_SECRET,
+            scope: [ 'user:email', 'repo' ]
+        },
+    },
+    user: {
+        additionalFields: {
+            selectedGroup: {
+                type: 'number',
+                required: false,
+            },
+            selectedProject: {
+                type: 'number',
+                required: false,
+            },
+        },
+    },
+});
+```
+
+Notable features:
+- GitHub OAuth with repository access scope
+- Custom user fields for UI state persistence
+- Drizzle adapter for database sessions
+
+## Next steps
+
+- Explore the [database schema](/development/database-schema) in detail
+- Learn about [contributing](/development/contributing) to the project
+- Check the [getting started guide](/development/getting-started) for setup instructions

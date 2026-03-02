@@ -1,0 +1,422 @@
+---
+title: Contributing
+description: Guidelines for contributing to Mórchlár
+---
+
+Thank you for your interest in contributing to Mórchlár! This guide will help you get started with contributing to the project.
+
+## Code of conduct
+
+We are committed to providing a welcoming and inclusive environment for all contributors. Please be respectful and constructive in all interactions.
+
+## Getting started
+
+Before you begin contributing:
+
+1. Set up your [local development environment](/development/getting-started)
+2. Familiarize yourself with the [architecture](/development/architecture)
+3. Review the [database schema](/development/database-schema)
+4. Check the issue tracker for existing issues or feature requests
+
+## Development workflow
+
+### 1. Fork and clone
+
+Fork the repository and clone your fork:
+
+```bash
+git clone https://github.com/YOUR_USERNAME/morchlár.git
+cd morchlár/source
+```
+
+### 2. Create a branch
+
+Create a new branch for your changes:
+
+```bash
+git checkout -b feature/your-feature-name
+# or
+git checkout -b fix/your-bug-fix
+```
+
+Branch naming conventions:
+- `feature/` - New features or enhancements
+- `fix/` - Bug fixes
+- `docs/` - Documentation changes
+- `refactor/` - Code refactoring
+- `test/` - Test additions or updates
+
+### 3. Make your changes
+
+Write your code following the project's coding standards:
+
+- Use TypeScript for all new code
+- Follow existing code structure and patterns
+- Add comments for complex logic
+- Keep functions focused and single-purpose
+
+### 4. Test your changes
+
+Ensure your changes work correctly:
+
+```bash
+# Start the development server
+bun run dev
+
+# Test all relevant functionality
+# - Create/edit/delete operations
+# - Authentication flows
+# - API endpoints
+# - UI components
+```
+
+### 5. Commit your changes
+
+Write clear, descriptive commit messages:
+
+```bash
+git add .
+git commit -m "Add feature: task progress tracking"
+```
+
+Commit message format:
+- Use present tense ("Add feature" not "Added feature")
+- Be specific about what changed
+- Reference issue numbers when applicable (`Fixes #123`)
+
+Good commit messages:
+- ✅ `Add task progress percentage to timeline view`
+- ✅ `Fix: Group member removal cascading delete`
+- ✅ `Refactor: Extract task query logic to separate file`
+
+Poor commit messages:
+- ❌ `Update code`
+- ❌ `Fix bug`
+- ❌ `WIP`
+
+### 6. Push and create a pull request
+
+Push your branch and create a pull request:
+
+```bash
+git push origin feature/your-feature-name
+```
+
+Then open a pull request on GitHub with:
+- A clear title describing the change
+- A detailed description of what changed and why
+- Screenshots for UI changes
+- References to related issues
+
+## Coding standards
+
+### TypeScript
+
+- Enable strict mode (already configured in `tsconfig.json`)
+- Avoid `any` types - use proper typing
+- Use type inference where possible
+- Export types alongside functions/components
+
+**Good**:
+```typescript
+export async function getTasksByProject(projectId: number): Promise<TasksSchema[]> {
+    return await db
+        .select()
+        .from(tasks)
+        .where(eq(tasks.projectId, projectId));
+}
+```
+
+**Avoid**:
+```typescript
+export async function getTasksByProject(projectId: any) {
+    return await db.select().from(tasks).where(eq(tasks.projectId, projectId));
+}
+```
+
+### Vue components
+
+- Use `<script setup>` syntax
+- Define prop types with TypeScript
+- Use composables for shared logic
+- Keep components focused and reusable
+
+**Example**:
+```vue
+<script setup lang="ts">
+import type { TasksSchema } from '~/lib/db/schema';
+
+interface Props {
+    task: TasksSchema;
+    editable?: boolean;
+}
+
+const props = defineProps<Props>();
+const emit = defineEmits<{
+    update: [task: TasksSchema];
+    delete: [id: number];
+}>();
+</script>
+
+<template>
+    <div class="task-item">
+        <h3>{{ task.title }}</h3>
+        <p>{{ task.description }}</p>
+    </div>
+</template>
+```
+
+### Database queries
+
+- Centralize queries in `lib/db/queries/`
+- Use Drizzle's type-safe query builder
+- Include proper error handling
+- Optimize with indexes and joins
+
+**Example query file** (`lib/db/queries/tasks.ts`):
+```typescript
+import db from '../index';
+import { tasks, projects } from '../schema';
+import { eq, and, isNull } from 'drizzle-orm';
+import type { TasksSchema } from '../schema';
+
+export async function getProjectTasks(projectId: number): Promise<TasksSchema[]> {
+    return await db
+        .select()
+        .from(tasks)
+        .where(
+            and(
+                eq(tasks.projectId, projectId),
+                isNull(tasks.parentId) // Only root tasks
+            )
+        )
+        .orderBy(tasks.order);
+}
+
+export async function getTaskWithSubtasks(taskId: number) {
+    return await db.query.tasks.findFirst({
+        where: eq(tasks.id, taskId),
+        with: {
+            subtasks: true,
+        },
+    });
+}
+```
+
+### API routes
+
+- Follow RESTful conventions
+- Validate input with Zod schemas
+- Return appropriate HTTP status codes
+- Include error handling
+- Require authentication where needed
+
+**Example API route** (`server/api/tasks/[id].patch.ts`):
+```typescript
+import { InsertTask } from '~/lib/db/schema';
+import { updateTask } from '~/lib/db/queries/tasks';
+
+export default defineEventHandler(async (event) => {
+    // Validate authentication
+    const session = await requireUserSession(event);
+    
+    const taskId = parseInt(event.context.params.id);
+    const body = await readBody(event);
+    
+    // Validate input
+    const validatedData = InsertTask.parse(body);
+    
+    try {
+        const updated = await updateTask(taskId, validatedData);
+        return updated;
+    } catch (error) {
+        throw createError({
+            statusCode: 500,
+            message: 'Failed to update task',
+        });
+    }
+});
+```
+
+## Database changes
+
+### Schema modifications
+
+When modifying the database schema:
+
+1. **Update the schema file** in `lib/db/schema/`:
+   ```typescript
+   // Add new column
+   export const tasks = pgTable("tasks", {
+       // ... existing columns
+       assignee: text('assignee').references(() => user.id),
+   });
+   ```
+
+2. **Update related types and relations**:
+   ```typescript
+   export const taskRelations = relations(tasks, ({ one, many }) => ({
+       // ... existing relations
+       assignedUser: one(user, {
+           fields: [tasks.assignee],
+           references: [user.id],
+       }),
+   }));
+   ```
+
+3. **Generate migration**:
+   ```bash
+   bun run db:generate
+   ```
+
+4. **Review the generated SQL** in `lib/db/migrations/`
+
+5. **Test the migration** on your local database:
+   ```bash
+   bun run db:migrate
+   ```
+
+6. **Update queries** in `lib/db/queries/` that use the modified table
+
+7. **Update insert schemas** if adding new required fields:
+   ```typescript
+   export const InsertTask = createInsertSchema(tasks).omit({
+       id: true,
+       createdAt: true,
+       updatedAt: true,
+   });
+   ```
+
+### Migration best practices
+
+- Never edit generated migration files manually
+- Always review migrations before committing
+- Test migrations on a copy of production data if possible
+- Include both `up` and `down` migration strategies in your PR description
+- Document breaking changes clearly
+
+## Testing
+
+### Manual testing checklist
+
+Before submitting a pull request, test:
+
+- **Authentication**:
+  - Sign in with GitHub
+  - Session persistence
+  - Sign out
+
+- **Groups**:
+  - Create new group
+  - Add/remove members
+  - Update group settings
+  - Delete group
+
+- **Projects**:
+  - Create project with GitHub repo
+  - View project tasks
+  - Update project settings
+  - Delete project
+
+- **Tasks**:
+  - Create root task
+  - Create subtask
+  - Update task progress
+  - Reorder tasks
+  - Delete task
+
+- **UI/UX**:
+  - Responsive design (mobile, tablet, desktop)
+  - Loading states
+  - Error states
+  - Empty states
+  - Form validation
+
+### Browser testing
+
+Test your changes in:
+- Chrome/Edge (Chromium)
+- Firefox
+- Safari (if available)
+
+## Documentation
+
+### When to update documentation
+
+Update documentation when you:
+
+- Add new features or API endpoints
+- Change database schema
+- Modify configuration options
+- Update environment variables
+- Change deployment processes
+
+### Documentation standards
+
+- Use clear, concise language
+- Include code examples
+- Add screenshots for UI changes
+- Link to related documentation
+- Keep the getting started guide up to date
+
+## Pull request guidelines
+
+### Before submitting
+
+- ✅ Code follows project standards
+- ✅ All features tested manually
+- ✅ Database migrations tested
+- ✅ No console errors or warnings
+- ✅ Documentation updated if needed
+- ✅ Commit messages are clear
+
+### PR description template
+
+```markdown
+## Description
+Brief description of what this PR does.
+
+## Changes
+- List of specific changes
+- Database schema updates
+- New API endpoints
+
+## Testing
+How to test these changes:
+1. Step one
+2. Step two
+
+## Screenshots
+(If applicable)
+
+## Related issues
+Fixes #123
+Related to #456
+```
+
+### Review process
+
+1. Automated checks must pass
+2. Code review by maintainers
+3. Changes requested (if any)
+4. Approval and merge
+
+## Getting help
+
+If you need help:
+
+- Check existing documentation
+- Search closed issues for similar problems
+- Open a new issue with:
+  - Clear description of the problem
+  - Steps to reproduce
+  - Expected vs actual behavior
+  - Environment details (OS, browser, etc.)
+
+## Recognition
+
+All contributors will be recognized in the project's contributors list. Thank you for helping make Mórchlár better!
+
+## License
+
+By contributing to Mórchlár, you agree that your contributions will be licensed under the same license as the project.

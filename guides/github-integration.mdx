@@ -1,0 +1,322 @@
+---
+title: GitHub integration
+description: Learn how to connect Mórchlár with your GitHub repositories
+---
+
+Mórchlár integrates deeply with GitHub to provide seamless project tracking linked to your repositories. This guide explains how the GitHub integration works and how to use it effectively.
+
+## How it works
+
+Mórchlár uses GitHub OAuth to authenticate users and access repositories. The integration:
+
+- Authenticates users via their GitHub account
+- Lists repositories the user has access to
+- Validates repository access when creating projects
+- Stores repository metadata for project tracking
+
+<Note>
+Mórchlár requires the `repo` scope to access repository information. This is configured in the Better Auth setup and requested during OAuth authorization.
+</Note>
+
+## Authentication setup
+
+The GitHub authentication is configured using Better Auth:
+
+```typescript lib/auth.ts
+export const auth = betterAuth({
+    database: drizzleAdapter(db, {
+        provider: 'pg',
+        schema,
+    }),
+    socialProviders: {
+        github: {
+            clientId: env.GITHUB_CLIENT_ID,
+            clientSecret: env.GITHUB_CLIENT_SECRET,
+            scope: [ 'user:email', 'repo' ]
+        },
+    },
+});
+```
+
+### Required OAuth scopes
+
+- **user:email** - Access user email addresses for account identification
+- **repo** - Full control of repositories, required for:
+  - Listing user repositories
+  - Accessing repository details
+  - Future issue tracking integration
+
+<Warning>
+Without the `repo` scope, users won't be able to create projects or link repositories. Ensure your GitHub OAuth App is configured with this scope.
+</Warning>
+
+## Repository access
+
+### Fetching user repositories
+
+When users create a project, Mórchlár fetches their accessible repositories:
+
+```typescript server/api/github/repos.get.ts
+export default defineAuthenticatedEventHandler(async (event) => {
+    const userId = event.context.user.id;
+    const token = await getUserGitHubAuthToken(userId);
+
+    const octokit = new Octokit({ auth: token });
+
+    const { data: repos } = await octokit.rest.repos.listForAuthenticatedUser();
+
+    const mappedRepos = repos.map((repo) => ({
+        owner: repo.owner.login,
+        name: repo.name,
+        icon: repo.owner.avatar_url,
+    }));
+
+    return mappedRepos;
+});
+```
+
+This endpoint:
+1. Retrieves the user's stored GitHub access token
+2. Uses Octokit to query GitHub's API
+3. Returns a simplified list of repositories with owner, name, and avatar
+
+### Repository selector component
+
+The UI presents repositories in a searchable dropdown:
+
+```vue components/Group/RepoSelector.vue
+<SelectRoot 
+    :name="props.fieldName" 
+    :id="props.fieldId"
+    v-model="value">
+    <SelectTrigger
+        class="inline-flex min-w-40 items-center justify-between 
+        rounded-lg px-4 leading-none h-8 gap-1 bg-main-700 ring-md"
+        :disabled="repos.length === 0">
+        <SelectValue :placeholder="placeholderText" />
+        <Icon name="hugeicons:arrow-down-01" class="size-3.5" />
+    </SelectTrigger>
+
+    <SelectPortal>
+        <SelectContent>
+            <SelectGroup>
+                <SelectItem
+                    v-for="(repo, index) in repos"
+                    :key="index"
+                    :value="`${repo.owner}/${repo.name}`">
+                    <img
+                        class="size-4 rounded-full mr-2"
+                        :src="repo.icon" />
+                    <span>
+                        {{ repo.owner }}/{{ repo.name }}
+                    </span>
+                </SelectItem>
+            </SelectGroup>
+        </SelectContent>
+    </SelectPortal>
+</SelectRoot>
+```
+
+## Creating projects with repositories
+
+<Steps>
+  <Step title="Navigate to a group">
+    Go to your group's dashboard page. You'll see existing projects and a button to "Import project from GitHub repo".
+  </Step>
+
+  <Step title="Open the project creation dialog">
+    Click the "Import project from GitHub repo" button. This opens a dialog with:
+    - Project title input
+    - Repository selector dropdown
+  </Step>
+
+  <Step title="Select a repository">
+    Click the repository dropdown to see all repositories you have access to. Repositories are displayed as `owner/name` with the owner's avatar.
+
+    <Tip>
+    When you select a repository, the project title automatically populates with the repository name. You can customize this title before creating the project.
+    </Tip>
+  </Step>
+
+  <Step title="Create the project">
+    Click "Import" to create the project. Mórchlár will:
+    1. Validate your access to the repository
+    2. Fetch repository details (ID, owner, name)
+    3. Create the project record
+    4. Link it to your group
+  </Step>
+</Steps>
+
+## Repository validation
+
+When creating a project, Mórchlár validates repository access on the server:
+
+```typescript server/api/projects/index.post.ts
+export default defineAuthenticatedEventHandler(async (event) => {
+    const userId = event.context.user.id;
+    const bodyData = await validateBody(event, ClientInsertProject);
+
+    // Validate GitHub repo access
+    const token = await getUserGitHubAuthToken(userId);
+
+    const repoStatus = await verifyGitHubRepoAccess(token, bodyData.repo);
+    if (!repoStatus.valid) {
+        throw createError({
+            statusCode: 400,
+            statusMessage: 'Bad Request',
+            message: 'Invalid repo'
+        });
+    }
+    
+    const createdProjectId = await createProject(
+        repoStatus.id, 
+        repoStatus.name, 
+        repoStatus.owner, 
+        bodyData.title, 
+        bodyData.groupId
+    );
+
+    return { id: createdProjectId };
+});
+```
+
+This ensures:
+- The repository exists
+- The user has access to it
+- Repository details are accurate
+
+<Warning>
+If a user's GitHub access is revoked or a repository is deleted, projects will remain but may show errors when accessing GitHub features. Consider implementing periodic validation checks.
+</Warning>
+
+## Repository data storage
+
+Mórchlár stores essential repository metadata:
+
+```typescript
+type ProjectSchema = {
+    id: number;
+    title: string;
+    groupId: number;
+    repoId: number;      // GitHub's numeric repository ID
+    repoName: string;    // Repository name (e.g., "my-project")
+    repoOwner: string;   // Owner username or org (e.g., "octocat")
+    createdAt: Date;
+    updatedAt: Date;
+};
+```
+
+### Why store repository metadata?
+
+- **Performance**: Avoid querying GitHub API for every project load
+- **Availability**: Projects remain accessible if GitHub is temporarily unavailable
+- **History**: Track projects even if repository names change
+- **Linking**: Use `repoOwner/repoName` to construct GitHub URLs
+
+## GitHub API integration patterns
+
+### Using Octokit
+
+Mórchlár uses the official [Octokit](https://github.com/octokit/octokit.js) library:
+
+```typescript
+import { Octokit } from 'octokit';
+
+const octokit = new Octokit({ auth: userToken });
+
+// Example: Get repository details
+const { data: repo } = await octokit.rest.repos.get({
+    owner: 'octocat',
+    repo: 'hello-world'
+});
+
+// Example: List user repositories
+const { data: repos } = await octokit.rest.repos.listForAuthenticatedUser();
+```
+
+### Token management
+
+GitHub access tokens are stored by Better Auth and retrieved when needed:
+
+```typescript server/utils/auth.ts
+export async function getUserGitHubAuthToken(userId: string): Promise<string> {
+    // Retrieve token from Better Auth's account table
+    // Returns the OAuth access token for GitHub
+}
+```
+
+<Tip>
+Tokens are stored securely by Better Auth and automatically refreshed when needed. You don't need to manually handle token expiration.
+</Tip>
+
+## Permissions and access control
+
+Mórchlár respects GitHub's permission model:
+
+1. **User repositories**: Users can only see and link repositories they have access to
+2. **Organization repositories**: Users can link org repos if they're a member
+3. **Private repositories**: Fully supported with proper OAuth scopes
+
+### Group-level access
+
+When a user creates a project from a repository:
+- The project belongs to the group, not the individual user
+- All group members can view the project
+- Repository access is still governed by GitHub permissions
+
+<Note>
+If a user loses access to a repository, they won't be able to create projects from it, but existing projects remain accessible to the group.
+</Note>
+
+## Future enhancements
+
+The GitHub integration is designed to support additional features:
+
+- **Issue synchronization**: Automatically create tasks from GitHub issues
+- **Commit tracking**: Link commits to tasks
+- **Pull request integration**: Track PR status within projects
+- **Webhooks**: Real-time updates from GitHub events
+
+## Troubleshooting
+
+### No repositories showing
+
+**Possible causes**:
+- Missing `repo` scope in OAuth configuration
+- User hasn't authorized the application
+- GitHub API rate limiting
+
+**Solution**: Check the browser console for API errors and verify OAuth scopes in GitHub App settings.
+
+### "Invalid repo" error
+
+This occurs when:
+- Repository was deleted
+- User lost access to the repository
+- Repository name changed
+
+**Solution**: Verify the repository still exists and the user has access on GitHub.
+
+### Rate limiting
+
+GitHub API has rate limits:
+- 5,000 requests/hour for authenticated requests
+- 60 requests/hour for unauthenticated requests
+
+<Warning>
+Mórchlár makes authenticated requests, providing a higher rate limit. However, in high-usage scenarios, implement caching to reduce API calls.
+</Warning>
+
+## Best practices
+
+1. **Cache repository lists**: Don't fetch repositories on every render
+2. **Handle API errors gracefully**: GitHub API may be unavailable
+3. **Validate access server-side**: Never trust client-supplied repository data
+4. **Store essential metadata**: Reduce dependency on GitHub API
+5. **Monitor rate limits**: Track API usage to avoid hitting limits
+
+## Next steps
+
+- [Create and manage groups](/guides/creating-groups)
+- [Set up projects](/guides/managing-projects)
+- [Track tasks on the timeline](/guides/task-timeline)

@@ -1,0 +1,294 @@
+---
+title: Tasks API
+description: Create and manage tasks with support for subtasks and progress tracking
+---
+
+## Overview
+
+Tasks represent work items within a project. They support hierarchical structures (parent-child relationships), time tracking, and progress monitoring.
+
+## Create a task
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://your-domain.com/api/tasks \
+  -H "Content-Type: application/json" \
+  -H "Cookie: better_auth.session_token=your-token" \
+  -d '{
+    "title": "Implement user authentication",
+    "description": "Add OAuth login with GitHub",
+    "projectId": 42,
+    "startTime": "2026-03-01T09:00:00Z",
+    "endTime": "2026-03-05T17:00:00Z",
+    "progress": 0,
+    "order": 0
+  }'
+```
+
+```json Response
+{
+  "id": 101
+}
+```
+</CodeGroup>
+
+Creates a new task within a project. Tasks can optionally be nested under parent tasks to create subtasks.
+
+### Request body
+
+<ParamField body="title" type="string" required>
+  The task title. A brief description of what needs to be done.
+</ParamField>
+
+<ParamField body="description" type="string">
+  Optional detailed description of the task.
+</ParamField>
+
+<ParamField body="projectId" type="number" required>
+  The ID of the project this task belongs to. You must have access to the project's group.
+</ParamField>
+
+<ParamField body="parentId" type="number">
+  Optional ID of the parent task. Use this to create subtasks.
+</ParamField>
+
+<ParamField body="startTime" type="string" required>
+  ISO 8601 timestamp for when the task starts.
+</ParamField>
+
+<ParamField body="endTime" type="string" required>
+  ISO 8601 timestamp for when the task should be completed.
+</ParamField>
+
+<ParamField body="progress" type="number">
+  Task completion percentage as a decimal from 0.0 to 1.0. Defaults to 0.
+</ParamField>
+
+<ParamField body="order" type="number">
+  Sort order among sibling tasks. Defaults to 0.
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="number">
+  The unique identifier for the created task.
+</ResponseField>
+
+### Errors
+
+- `400 Bad Request` - Invalid request body or failed to insert task
+- `401 Unauthorized` - User is not authenticated
+
+---
+
+## List project tasks
+
+<CodeGroup>
+```bash cURL
+curl https://your-domain.com/api/tasks/42 \
+  -H "Cookie: better_auth.session_token=your-token"
+```
+
+```json Response
+[
+  {
+    "id": 101,
+    "title": "Implement user authentication",
+    "description": "Add OAuth login with GitHub",
+    "projectId": 42,
+    "parentId": null,
+    "startTime": "2026-03-01T09:00:00Z",
+    "endTime": "2026-03-05T17:00:00Z",
+    "progress": 0.5,
+    "order": 0,
+    "createdAt": "2026-02-28T10:00:00Z",
+    "updatedAt": "2026-03-02T14:30:00Z"
+  },
+  {
+    "id": 102,
+    "title": "Set up OAuth provider",
+    "description": "Configure GitHub OAuth app",
+    "projectId": 42,
+    "parentId": 101,
+    "startTime": "2026-03-01T09:00:00Z",
+    "endTime": "2026-03-02T17:00:00Z",
+    "progress": 1.0,
+    "order": 0,
+    "createdAt": "2026-02-28T10:05:00Z",
+    "updatedAt": "2026-03-02T11:00:00Z"
+  }
+]
+```
+</CodeGroup>
+
+Returns all tasks for a specific project. The authenticated user must have access to the project through group membership.
+
+### Path parameters
+
+<ParamField path="projectId" type="number" required>
+  The unique identifier of the project.
+</ParamField>
+
+### Response
+
+Returns an array of task objects:
+
+<ResponseField name="id" type="number">
+  The unique identifier for the task.
+</ResponseField>
+
+<ResponseField name="title" type="string">
+  The task title.
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  The task description (may be null).
+</ResponseField>
+
+<ResponseField name="projectId" type="number">
+  The ID of the project this task belongs to.
+</ResponseField>
+
+<ResponseField name="parentId" type="number">
+  The ID of the parent task if this is a subtask (null for top-level tasks).
+</ResponseField>
+
+<ResponseField name="startTime" type="string">
+  ISO 8601 timestamp for when the task starts.
+</ResponseField>
+
+<ResponseField name="endTime" type="string">
+  ISO 8601 timestamp for when the task should be completed.
+</ResponseField>
+
+<ResponseField name="progress" type="number">
+  Task completion percentage as a decimal from 0.0 to 1.0.
+</ResponseField>
+
+<ResponseField name="order" type="number">
+  Sort order among sibling tasks.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  ISO 8601 timestamp of when the task was created.
+</ResponseField>
+
+<ResponseField name="updatedAt" type="string">
+  ISO 8601 timestamp of the last update to the task.
+</ResponseField>
+
+### Errors
+
+- `400 Bad Request` - Invalid project ID
+- `401 Unauthorized` - User is not authenticated
+- `404 Not Found` - Project not found or user doesn't have access
+
+---
+
+## Working with subtasks
+
+Tasks support hierarchical structures through the `parentId` field. This allows you to create task breakdowns:
+
+### Creating a subtask
+
+```bash
+curl -X POST https://your-domain.com/api/tasks \
+  -H "Content-Type: application/json" \
+  -H "Cookie: better_auth.session_token=your-token" \
+  -d '{
+    "title": "Write unit tests",
+    "projectId": 42,
+    "parentId": 101,
+    "startTime": "2026-03-03T09:00:00Z",
+    "endTime": "2026-03-04T17:00:00Z"
+  }'
+```
+
+The `parentId` field links this task to task 101 as a subtask.
+
+### Task hierarchy
+
+- **Parent tasks** have `parentId: null`
+- **Subtasks** have a `parentId` pointing to their parent
+- Subtasks can have their own subtasks, creating multiple levels of nesting
+- Deleting a parent task automatically deletes all its subtasks (cascade delete)
+
+---
+
+## Progress tracking
+
+The `progress` field tracks task completion:
+
+- **Value range**: 0.0 (0%) to 1.0 (100%)
+- **Default**: 0.0 when a task is created
+- **Format**: Decimal number (e.g., 0.5 = 50%, 0.75 = 75%)
+
+### Updating progress
+
+While there's no dedicated update endpoint shown in the current implementation, progress can be tracked by:
+
+1. Creating tasks with initial progress
+2. Monitoring task completion status
+3. Using progress values to calculate overall project completion
+
+---
+
+## Task ordering
+
+The `order` field controls the display order of sibling tasks:
+
+- Tasks with lower `order` values appear first
+- Default value is 0
+- Useful for prioritizing tasks or creating a specific workflow sequence
+
+### Example ordering
+
+```json
+[
+  {"id": 101, "title": "First task", "order": 0},
+  {"id": 102, "title": "Second task", "order": 1},
+  {"id": 103, "title": "Third task", "order": 2}
+]
+```
+
+---
+
+## Schema reference
+
+Tasks are stored with the following schema:
+
+```typescript
+{
+  id: number;              // Auto-generated primary key
+  title: string;           // Task title (required)
+  description: string;     // Task description (optional)
+  projectId: number;       // Foreign key to projects table (required)
+  parentId: number;        // Foreign key to parent task (optional, for subtasks)
+  startTime: Date;         // Task start time (required)
+  endTime: Date;           // Task end time (required)
+  progress: number;        // Completion percentage 0.0-1.0 (default: 0)
+  order: number;           // Sort order among siblings (default: 0)
+  createdAt: Date;         // Creation timestamp
+  updatedAt: Date;         // Last update timestamp
+}
+```
+
+## Best practices
+
+<AccordionGroup>
+  <Accordion title="Use subtasks for large tasks">
+    Break down complex tasks into smaller subtasks for better tracking and management. Each subtask can have its own progress and timeline.
+  </Accordion>
+  
+  <Accordion title="Set realistic time estimates">
+    Ensure `startTime` and `endTime` reflect realistic estimates. These dates help with project planning and timeline visualization.
+  </Accordion>
+  
+  <Accordion title="Update progress regularly">
+    Keep the progress field updated to reflect current completion status. This helps track project velocity and identify blockers.
+  </Accordion>
+  
+  <Accordion title="Use order for dependencies">
+    Use the order field to indicate task sequences and dependencies, making it clear which tasks should be completed first.
+  </Accordion>
+</AccordionGroup>

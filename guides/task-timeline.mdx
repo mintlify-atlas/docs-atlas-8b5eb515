@@ -1,0 +1,559 @@
+---
+title: Working with the timeline-based task system
+description: Track project tasks with visual timeline charts
+---
+
+Mórchlár's task system uses a visual timeline to track work across projects. Tasks are displayed as horizontal bars on a timeline, making it easy to see what's happening when and identify scheduling conflicts.
+
+## Understanding tasks
+
+Tasks in Mórchlár:
+- Belong to a specific project
+- Have start and end dates
+- Display on an interactive timeline
+- Support hierarchical structure (parent/subtasks)
+- Track progress as a percentage
+- Can be ordered relative to siblings
+
+<Note>
+The timeline view is powered by the `vue-timeline-chart` library, providing a Gantt chart-style visualization of all project tasks.
+</Note>
+
+## Task structure
+
+Tasks are stored with comprehensive temporal and hierarchical data:
+
+```typescript lib/db/schema/tasks.ts
+export const tasks = pgTable("tasks", {
+    id: serial("id").primaryKey(),
+    title: text("title").notNull(),
+    description: text("description"),
+
+    projectId: integer('project_id')
+        .references(() => projects.id, { onDelete: 'cascade' })
+        .notNull(),
+    parentId: integer('parent_id')
+        .references((): AnyPgColumn => tasks.id, { onDelete: 'cascade' }),
+
+    startTime: timestamp('start_time').notNull(),
+    endTime: timestamp('end_time').notNull(),
+    progress: real('progress').default(0), // 0.00 to 1.00
+
+    order: integer('order').default(0), // Order as sibling
+
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+        .$onUpdate(() => new Date())
+        .notNull(),
+});
+```
+
+**Field descriptions**:
+- **title**: Task name displayed on timeline
+- **description**: Detailed task information
+- **projectId**: Links task to parent project (cascade deletes)
+- **parentId**: Creates subtask relationships (optional)
+- **startTime**: When task begins
+- **endTime**: When task completes
+- **progress**: Completion percentage (0.0 = 0%, 1.0 = 100%)
+- **order**: Sort order among sibling tasks
+
+## Timeline visualization
+
+The project page displays tasks on an interactive timeline:
+
+```vue app/pages/dashboard/group/[groupId]/project/[projectId]/index.vue
+<Timeline
+    :items
+    :groups
+    :initial-viewport-start="bounds.lower"
+    :initial-viewport-end="bounds.upper"
+/>
+```
+
+### Timeline items
+
+Tasks are transformed into timeline items:
+
+```typescript
+const items = computed<TimelineItem[]>(() => {
+    if (!tasksInfo.value) return [];
+    
+    return tasksInfo.value.map((task) => {
+        return {
+            id: task.id.toString(),
+            group: `${task.id}-group`,
+            type: 'range',
+            start: new Date(task.startTime).getTime(),
+            end: new Date(task.endTime).getTime()
+        }
+    })
+});
+```
+
+Each item has:
+- Unique ID (task ID)
+- Group assignment (for row grouping)
+- Type ("range" for date ranges)
+- Start time (Unix timestamp)
+- End time (Unix timestamp)
+
+### Timeline groups
+
+Tasks are grouped by title for display:
+
+```typescript
+const groups = computed<TimelineGroup[]>(() => {
+    if (!tasksInfo.value) return [];
+
+    return tasksInfo.value.map((task) => {
+        return {
+            id: `${task.id}-group`,
+            label: task.title,
+        }
+    })
+});
+```
+
+Each group:
+- Corresponds to a timeline row
+- Displays the task title as label
+- Can contain one or more time ranges
+
+### Viewport bounds
+
+The timeline auto-calculates optimal viewport bounds:
+
+```typescript
+const PADDING_MS = 604800000; // 1 week padding
+
+const bounds = computed<{ lower: number, upper: number }>(() => {
+    // Default: 1 month behind and ahead
+    const defaultValues = {
+        lower: Date.now() - 2629800000,
+        upper: Date.now() + 2629800000
+    };
+
+    if (!items.value || !items.value[0]) return defaultValues;
+
+    const lowest = items.value.reduce(
+        (lowest, item) => item.start < lowest.start ? item : lowest, 
+        items.value[0]
+    );
+    const highest = items.value.reduce(
+        (highest, item) => item.start > highest.start ? item : highest, 
+        items.value[0]
+    );
+    
+    return {
+        lower: lowest.start - PADDING_MS,
+        upper: (highest.end ?? defaultValues.upper) + PADDING_MS,
+    };
+});
+```
+
+This ensures:
+- All tasks are visible
+- Extra space before/after for context
+- Sensible defaults when no tasks exist
+
+<Tip>
+The timeline automatically adjusts its viewport to show all tasks with 1 week of padding on each side. You can zoom and pan to focus on specific time periods.
+</Tip>
+
+## Creating tasks
+
+<Steps>
+  <Step title="Navigate to project timeline">
+    Go to a project page at `/dashboard/group/{groupId}/project/{projectId}`. The timeline view is the default page.
+  </Step>
+
+  <Step title="Click 'New Task'">
+    Below the timeline, click the "New Task" button. This opens a dialog for task creation:
+
+    ```vue
+    <AppDialog
+        title="Add a new task"
+        description="Select a title, description, and date range.">
+        <template #trigger>
+            <ButtonSecondary>
+                New Task
+            </ButtonSecondary>
+        </template>
+    </AppDialog>
+    ```
+  </Step>
+
+  <Step title="Fill in task details">
+    The task creation form has three fields:
+
+    **Title** (required):
+    ```vue
+    <AppFormInput
+        v-model="taskName"
+        label="Title"
+        name="title"
+        placeholder="My Task" />
+    ```
+
+    **Description** (required):
+    ```vue
+    <AppFormInput
+        v-model="taskDesc"
+        label="Description"
+        name="description"
+        placeholder="We need to..." />
+    ```
+
+    **Timespan** (required):
+    ```vue
+    <DatePicker 
+        date-picker-label="Timespan"
+        v-model="dateValue"/>
+    ```
+
+    The date picker allows selecting a start and end date for the task.
+  </Step>
+
+  <Step title="Create the task">
+    Click "Create Task" to submit. The task is:
+    1. Validated on the client
+    2. Sent to the server
+    3. Stored in the database
+    4. Added to the timeline immediately
+  </Step>
+</Steps>
+
+## Task creation flow
+
+### Client-side submission
+
+```vue app/pages/dashboard/group/[groupId]/project/[projectId]/index.vue
+async function addTask() {
+    // Validation
+    if (!taskName.value || !taskDesc.value || !dateValue.value || !projectId.value) return;
+    if (isNaN(Number(projectId.value))) return;
+    if (!dateValue.value.start || !dateValue.value.end) return;
+
+    // Convert DateRange to Date objects
+    const startDate = new Date(
+        dateValue.value.start.year, 
+        dateValue.value.start.month - 1,
+        dateValue.value.start.day, 
+    );
+
+    const endDate = new Date(
+        dateValue.value.end.year, 
+        dateValue.value.end.month - 1, 
+        dateValue.value.end.day, 
+    );
+
+    // Build request body
+    const body: InsertTaskSchema = {
+        title: taskName.value,
+        projectId: Number(projectId.value.toString()),
+        startTime: startDate,
+        endTime: endDate,
+        description: taskDesc.value,
+    };
+
+    // Submit
+    const result = await $csrfFetch(`/api/tasks`, { method: "POST", body });
+
+    if (result.id) {
+        renderTask(startDate, endDate, taskName.value, result.id);
+    } else {
+        alert('Failed to add task');
+    }
+}
+```
+
+**Key points**:
+- DateRange from picker is converted to JavaScript Date objects
+- Dates are constructed using year, month (0-indexed), and day
+- Time component defaults to midnight
+- Optimistic rendering adds task to timeline immediately
+
+### Server-side processing
+
+```typescript server/api/tasks/index.post.ts
+export default defineAuthenticatedEventHandler(async (event) => {
+    const body = await validateBody(event, InsertTask);
+
+    const result = await createTask(body);
+    if (!result[0] || !result[0].id) {
+        throw createError({
+            statusCode: 400,
+            statusMessage: "Bad Request",
+            message: "There was a problem inserting task into table."
+        });
+    }
+
+    return { id: result[0].id };
+});
+```
+
+Server:
+1. Validates request body against schema
+2. Preprocesses date strings to Date objects
+3. Inserts task into database
+4. Returns new task ID
+
+### Date preprocessing
+
+The schema handles date conversion:
+
+```typescript lib/db/schema/tasks.ts
+const preprocessDate = z.preprocess((value) => {   
+    // Convert date strings to Date instances
+    if (typeof value === 'string' && value.trim() !== '') {
+        return new Date(value);
+    }
+    return value;                                                                                                                                                                             
+}, z.date());
+
+export const InsertTask = createInsertSchema(tasks, {
+    startTime: () => preprocessDate,
+    endTime: () => preprocessDate,
+}).omit({
+    id: true,
+    createdAt: true,
+    updatedAt: true,
+});
+```
+
+This allows submitting dates as:
+- ISO strings (e.g., `"2026-03-15T00:00:00Z"`)
+- Date objects
+- Any format parseable by `new Date()`
+
+<Note>
+Date preprocessing happens automatically during validation. You don't need to manually convert dates before sending to the server.
+</Note>
+
+## Optimistic rendering
+
+After creating a task, it's immediately added to the timeline:
+
+```typescript
+function renderTask(startTime: Date, endTime: Date, groupName: string, taskId: number) {
+    groups.value.push({
+        id: taskId.toString(),
+        label: groupName,
+    });
+
+    items.value.push({
+        type: "range",
+        start: startTime.getTime(),
+        end: endTime.getTime(),
+        group: taskId.toString(),
+    });
+}
+```
+
+This provides instant feedback without waiting for a page refresh.
+
+<Warning>
+The current implementation uses optimistic rendering but doesn't refetch task data. If the server fails to create the task, the timeline will show it incorrectly. Consider refreshing task data after creation in production.
+</Warning>
+
+## Task hierarchy (parent/subtasks)
+
+Tasks support hierarchical relationships:
+
+```typescript
+export const taskRelations = relations(tasks, ({ one, many }) => ({
+    project: one(projects, {
+        fields: [tasks.projectId],
+        references: [projects.id],
+    }),
+    parent: one(tasks, {
+        fields: [tasks.parentId],
+        references: [tasks.id],
+        relationName: 'subtasks',
+    }),
+    subtasks: many(tasks, {
+        relationName: 'subtasks',
+    }),
+}));
+```
+
+This enables:
+- Parent tasks with multiple subtasks
+- Cascading deletion (deleting parent removes subtasks)
+- Hierarchical display in future UI enhancements
+
+<Note>
+Parent/subtask relationships are defined in the schema but not yet exposed in the UI. This is a foundation for future work breakdown structure features.
+</Note>
+
+## Progress tracking
+
+Each task has a progress field:
+
+```typescript
+progress: real('progress').default(0), // 0.00 to 1.00
+```
+
+- Stored as a decimal (0.0 to 1.0)
+- Represents completion percentage
+- Defaults to 0 (not started)
+- Can be updated as work progresses
+
+**Example values**:
+- `0.0` = 0% complete (not started)
+- `0.25` = 25% complete (in progress)
+- `0.5` = 50% complete (halfway)
+- `1.0` = 100% complete (done)
+
+<Tip>
+Progress tracking is stored but not yet visualized in the timeline. Future versions may show progress bars within timeline items or color-code based on completion.
+</Tip>
+
+## Timeline interactions
+
+The timeline component supports several interactions:
+
+### Zooming
+- Scroll wheel: Zoom in/out
+- Pinch gesture: Zoom on touch devices
+- Zoom controls: (if enabled in config)
+
+### Panning
+- Click and drag: Move timeline horizontally
+- Arrow keys: (if keyboard navigation enabled)
+
+### Selection
+- Click items: Select tasks
+- Click groups: Focus on specific task rows
+
+<Note>
+Click handlers for timeline items are not yet implemented. Future versions will show task details, enable editing, and provide quick actions on click.
+</Note>
+
+## Task ordering
+
+Tasks have an `order` field for sibling sorting:
+
+```typescript
+order: integer('order').default(0),
+```
+
+This allows:
+- Custom ordering within the same time range
+- Drag-and-drop reordering (future feature)
+- Priority-based display
+
+Currently, tasks are displayed in creation order. The order field is available for future UI enhancements.
+
+## Best practices
+
+### Task planning
+
+- Create tasks with realistic timeframes
+- Break large tasks into smaller subtasks (when UI supports it)
+- Use descriptive titles visible at a glance
+- Add detailed descriptions for context
+- Avoid overlapping tasks for the same person
+
+### Timeline management
+
+- Review timeline regularly for conflicts
+- Adjust task dates as plans change
+- Use progress tracking to show status
+- Keep task count manageable (< 50 per project)
+- Archive or delete obsolete tasks
+
+### Naming conventions
+
+- Use verb phrases: "Implement authentication", "Design homepage"
+- Include component/feature: "API: Add user endpoints"
+- Add status prefixes if needed: "[BLOCKED] Fix database migration"
+- Keep titles under 50 characters for readability
+
+## Limitations and considerations
+
+### Current limitations
+
+- No task editing UI (database-only updates)
+- No task deletion via UI
+- Progress not updated in UI
+- No task dependencies or relationships displayed
+- No task assignment to specific users
+- No task filtering or search
+
+### Performance considerations
+
+The timeline performance degrades with many tasks:
+- **< 50 tasks**: Excellent performance
+- **50-200 tasks**: Good performance
+- **> 200 tasks**: May experience lag
+
+<Warning>
+For projects with hundreds of tasks, consider:
+- Filtering by date range
+- Pagination or virtual scrolling
+- Separate timelines for different phases
+- Archiving completed tasks
+</Warning>
+
+## Database cascade behavior
+
+Task deletion cascades:
+
+```typescript
+projectId: integer('project_id')
+    .references(() => projects.id, { onDelete: 'cascade' })
+```
+
+When a project is deleted:
+- All tasks are automatically deleted
+- Subtasks are also removed (via parentId cascade)
+- No orphaned tasks remain
+
+## Troubleshooting
+
+### Tasks not appearing
+
+If tasks don't show on the timeline:
+- Verify task creation returned success
+- Check browser console for errors
+- Refresh the page to reload data
+- Verify start/end dates are valid
+- Check timeline viewport bounds
+
+### Date picker issues
+
+If dates aren't saving correctly:
+- Ensure both start and end dates are selected
+- Verify date picker returns proper DateRange format
+- Check for timezone discrepancies
+- Test with different date ranges
+
+### Timeline rendering errors
+
+If the timeline fails to render:
+- Check task data format matches TimelineItem interface
+- Verify no duplicate task IDs
+- Ensure start < end for all tasks
+- Look for invalid timestamps
+
+## Future enhancements
+
+Planned task features include:
+- Task editing and deletion UI
+- User assignment and tracking
+- Task dependencies (start after X finishes)
+- Progress visualization on timeline
+- Task filtering and search
+- Export timeline as image/PDF
+- Recurring tasks
+- Task templates
+- GitHub issue synchronization
+
+## Next steps
+
+Now that you understand task management:
+- [Learn about group organization](/guides/creating-groups)
+- [Explore project management](/guides/managing-projects)
+- [Understand GitHub integration](/guides/github-integration)

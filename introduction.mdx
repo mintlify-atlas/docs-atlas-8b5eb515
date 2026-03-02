@@ -1,0 +1,184 @@
+---
+title: Introduction
+description: Collaborative team project tracking platform with GitHub integration
+---
+
+# Welcome to Mórchlár
+
+Mórchlár is a collaborative team project tracking platform designed for development teams who use GitHub. Built with modern web technologies, it provides seamless integration with your GitHub repositories and offers powerful tools for managing projects, tasks, and team collaboration.
+
+<CardGroup cols={2}>
+  <Card
+    title="Quick start"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Get up and running with Mórchlár in minutes
+  </Card>
+  <Card
+    title="Authentication"
+    icon="shield"
+    href="/features/authentication"
+  >
+    Learn about GitHub OAuth integration
+  </Card>
+  <Card
+    title="Creating groups"
+    icon="users"
+    href="/guides/creating-groups"
+  >
+    Set up your first team group
+  </Card>
+  <Card
+    title="API overview"
+    icon="code"
+    href="/api/overview"
+  >
+    Explore the API endpoints
+  </Card>
+</CardGroup>
+
+## Key features
+
+Mórchlár provides everything you need to manage your team's projects effectively:
+
+### GitHub integration
+
+Authenticate with GitHub OAuth and connect your repositories directly to projects. Mórchlár requests the necessary permissions (`user:email` and `repo` scopes) to verify repository access and integrate seamlessly with your workflow.
+
+### Group-based collaboration
+
+Organize your teams into groups with role-based permissions:
+
+- **Owner**: Full control over group settings and membership
+- **Developer**: Can create and manage projects and tasks
+- **Reader**: View-only access to group projects
+
+### Project tracking
+
+Each project links to a GitHub repository and includes:
+
+- Repository metadata (owner, name, ID)
+- Task management with hierarchical structures
+- Timeline-based planning with start/end dates
+- Progress tracking for individual tasks
+
+### Timeline management
+
+Visualize project progress with timeline charts powered by `vue-timeline-chart`. Tasks support:
+
+- Parent-child relationships for subtasks
+- Custom ordering within task groups
+- Progress indicators (0-100%)
+- Flexible date ranges
+
+## Technology stack
+
+Mórchlár is built with a modern, type-safe technology stack:
+
+<Note>
+  **Frontend**: Nuxt 3 + Vue 3 + TypeScript + Tailwind CSS 4
+  
+  **Backend**: Nuxt server routes with better-auth
+  
+  **Database**: PostgreSQL with Drizzle ORM
+  
+  **Authentication**: GitHub OAuth via better-auth
+  
+  **Package Manager**: Bun
+</Note>
+
+Key dependencies include:
+
+- **better-auth**: Modern authentication library with GitHub OAuth support
+- **Drizzle ORM**: Type-safe SQL toolkit with automatic schema migrations
+- **Octokit**: Official GitHub REST API client
+- **Reka UI**: Headless UI components for Vue
+- **Pinia**: State management for Vue 3
+
+## Architecture
+
+The application follows Nuxt 3's directory structure:
+
+```
+app/
+├── components/     # Reusable Vue components
+├── composables/    # Vue composition functions
+├── layouts/        # Application layouts (default, dashboard)
+├── pages/          # File-based routing
+└── stores/         # Pinia state management
+
+server/
+├── api/            # API route handlers
+├── middleware/     # Server middleware
+└── utils/          # Server utilities
+
+lib/
+├── auth.ts         # better-auth configuration
+├── db/             # Database setup and queries
+│   ├── schema/     # Drizzle schema definitions
+│   ├── queries/    # Database query functions
+│   └── migrations/ # SQL migration files
+└── env.ts          # Environment variable validation
+```
+
+## Database schema
+
+The platform uses five main tables:
+
+**Groups**: Team organizations with unique slugs
+```typescript
+{
+  id: number
+  name: string
+  slug: string (unique)
+  createdAt: timestamp
+  updatedAt: timestamp
+}
+```
+
+**Group Members**: Join table with role-based permissions
+```typescript
+{
+  groupId: number
+  userId: string
+  role: 'owner' | 'developer' | 'reader'
+}
+```
+
+**Projects**: GitHub repository connections
+```typescript
+{
+  id: number
+  title: string
+  groupId: number
+  repoId: number
+  repoName: string
+  repoOwner: string
+  createdAt: timestamp
+  updatedAt: timestamp
+}
+```
+
+**Tasks**: Timeline-based project tasks
+```typescript
+{
+  id: number
+  title: string
+  description: string?
+  projectId: number
+  parentId: number?       // For subtasks
+  startTime: timestamp
+  endTime: timestamp
+  progress: number        // 0.00 to 1.00
+  order: number           // Sibling ordering
+  createdAt: timestamp
+  updatedAt: timestamp
+}
+```
+
+**Auth Tables**: Managed by better-auth (users, sessions, accounts, verifications)
+
+## Next steps
+
+Ready to get started? Follow the [quick start guide](/quickstart) to set up your local development environment and create your first group.

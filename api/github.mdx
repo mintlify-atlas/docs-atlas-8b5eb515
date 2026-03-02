@@ -1,0 +1,253 @@
+---
+title: GitHub integration
+description: Access GitHub repositories and data through the Mórchlár API
+---
+
+## Overview
+
+Mórchlár integrates with GitHub to provide repository management and data access. The GitHub integration uses the authenticated user's GitHub access token (obtained during OAuth login) to interact with the GitHub API.
+
+## List user repositories
+
+<CodeGroup>
+```bash cURL
+curl https://your-domain.com/api/github/repos \
+  -H "Cookie: better_auth.session_token=your-token"
+```
+
+```json Response
+[
+  {
+    "owner": "octocat",
+    "name": "hello-world",
+    "icon": "https://avatars.githubusercontent.com/u/583231"
+  },
+  {
+    "owner": "mycompany",
+    "name": "website",
+    "icon": "https://avatars.githubusercontent.com/u/123456"
+  },
+  {
+    "owner": "mycompany",
+    "name": "mobile-app",
+    "icon": "https://avatars.githubusercontent.com/u/123456"
+  }
+]
+```
+</CodeGroup>
+
+Returns all GitHub repositories accessible to the authenticated user. This includes repositories they own, have access to, or are part of organizations they belong to.
+
+### Response
+
+Returns an array of repository objects:
+
+<ResponseField name="owner" type="string">
+  The username or organization name that owns the repository.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  The repository name.
+</ResponseField>
+
+<ResponseField name="icon" type="string">
+  URL to the repository owner's avatar image.
+</ResponseField>
+
+### Errors
+
+- `401 Unauthorized` - User is not authenticated or GitHub access token is missing
+- `500 Internal Server Error` - GitHub API error
+
+---
+
+## GitHub authentication scope
+
+When users authenticate with GitHub, Mórchlár requests the following OAuth scopes:
+
+### Required scopes
+
+<ParamField name="user:email" type="string">
+  Access to the user's email address for account identification.
+</ParamField>
+
+<ParamField name="repo" type="string">
+  Full control of private repositories. This scope allows Mórchlár to:
+  - List all accessible repositories (public and private)
+  - Read repository details and metadata
+  - Access repository collaborators
+  - Read repository issues and pull requests
+</ParamField>
+
+### Token storage
+
+GitHub access tokens are securely stored in the database when users authenticate. These tokens are:
+
+- Encrypted at rest
+- Used automatically for GitHub API calls
+- Refreshed when needed (if refresh tokens are available)
+- Deleted when the user disconnects their GitHub account
+
+---
+
+## Repository verification
+
+When creating projects, Mórchlár verifies repository access:
+
+```bash
+# This happens automatically during project creation
+curl -X POST https://your-domain.com/api/projects \
+  -H "Content-Type: application/json" \
+  -H "Cookie: better_auth.session_token=your-token" \
+  -d '{
+    "title": "My Project",
+    "groupId": 1,
+    "repo": "owner/repository-name",
+    "repoName": "repository-name",
+    "repoOwner": "owner"
+  }'
+```
+
+The API:
+1. Extracts the owner and repository name from the `repo` field
+2. Calls the GitHub API to verify the repository exists
+3. Confirms the user has access to the repository
+4. Retrieves the repository ID for storage
+
+If verification fails, the project creation returns a `400 Bad Request` error.
+
+---
+
+## GitHub API integration
+
+The integration uses [Octokit](https://github.com/octokit/octokit.js) (the official GitHub API client) for all GitHub interactions:
+
+```typescript
+import { Octokit } from 'octokit';
+
+const octokit = new Octokit({ auth: userGitHubToken });
+```
+
+### Available operations
+
+Current GitHub integration features:
+
+<AccordionGroup>
+  <Accordion title="List repositories">
+    Fetches all repositories accessible to the authenticated user using `repos.listForAuthenticatedUser()`.
+  </Accordion>
+  
+  <Accordion title="Verify repository access">
+    Validates that a user has access to a specific repository before linking it to a project.
+  </Accordion>
+  
+  <Accordion title="Get repository collaborators">
+    Retrieves the list of collaborators for a repository (under development in the members endpoint).
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Rate limiting
+
+GitHub API has rate limits that apply to all requests:
+
+- **Authenticated requests**: 5,000 requests per hour per user
+- **Search API**: 30 requests per minute
+
+Mórchlár uses the user's personal access token, so rate limits are per-user. If you exceed the rate limit, GitHub returns a `403 Forbidden` response with rate limit details.
+
+### Checking rate limits
+
+You can check your current rate limit status using the GitHub API directly:
+
+```bash
+curl https://api.github.com/rate_limit \
+  -H "Authorization: Bearer your-github-token"
+```
+
+---
+
+## Permissions and security
+
+### Repository access
+
+Users can only:
+- List repositories they have access to
+- Create projects for repositories they can access
+- Access repository data they have permissions for
+
+### Token security
+
+GitHub access tokens are:
+- Never exposed in API responses
+- Stored securely in the database
+- Used only on the server side
+- Associated with the user's session
+
+### Best practices
+
+<AccordionGroup>
+  <Accordion title="Limit repository scope">
+    Only connect repositories that are relevant to your Mórchlár projects. This minimizes the data accessible through the integration.
+  </Accordion>
+  
+  <Accordion title="Review OAuth permissions">
+    Understand what the `repo` scope grants access to. It provides full control of private repositories.
+  </Accordion>
+  
+  <Accordion title="Revoke access if needed">
+    You can revoke Mórchlár's access to your GitHub account at any time through GitHub's OAuth application settings.
+  </Accordion>
+  
+  <Accordion title="Monitor API usage">
+    Be aware of GitHub API rate limits, especially if you're making frequent requests to list repositories or repository data.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Future enhancements
+
+Planned GitHub integration features:
+
+- Sync GitHub issues as tasks
+- Link pull requests to tasks
+- Webhook integration for real-time updates
+- Repository insights and analytics
+- Team synchronization between GitHub and Mórchlár groups
+
+---
+
+## Troubleshooting
+
+### Repository not found
+
+If you can't find a repository when creating a project:
+
+1. Verify you have access to the repository on GitHub
+2. Ensure the repository name and owner are correct
+3. Check that your GitHub access token has the required scopes
+4. Try re-authenticating with GitHub
+
+### GitHub API errors
+
+If you encounter GitHub API errors:
+
+1. Check the GitHub status page: https://www.githubstatus.com/
+2. Verify you haven't exceeded rate limits
+3. Ensure your GitHub account is in good standing
+4. Try disconnecting and reconnecting your GitHub account
+
+---
+
+## Related endpoints
+
+<CardGroup cols={2}>
+  <Card title="Projects API" icon="folder" href="/api/projects">
+    Create projects linked to GitHub repositories
+  </Card>
+  <Card title="Authentication" icon="lock" href="/api/authentication">
+    Learn about GitHub OAuth authentication
+  </Card>
+</CardGroup>

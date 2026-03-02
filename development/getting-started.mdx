@@ -1,0 +1,191 @@
+---
+title: Getting started
+description: Set up your local development environment for Mórchlár
+---
+
+This guide will help you set up Mórchlár for local development.
+
+## Prerequisites
+
+Before you begin, ensure you have the following installed:
+
+- **Bun** 1.0 or later (recommended) or Node.js 18+
+- **PostgreSQL** database (we recommend Neon for serverless PostgreSQL)
+- **Git** for version control
+- A **GitHub OAuth App** for authentication
+
+## Clone the repository
+
+Clone the Mórchlár repository to your local machine:
+
+```bash
+git clone <repository-url>
+cd source
+```
+
+## Install dependencies
+
+Install the project dependencies using Bun:
+
+```bash
+bun install
+```
+
+Alternatively, you can use npm, pnpm, or yarn:
+
+```bash
+npm install
+# or
+pnpm install
+# or
+yarn install
+```
+
+## Configure environment variables
+
+Create a `.env` file in the root directory by copying the example file:
+
+```bash
+cp .env.example .env
+```
+
+Update the `.env` file with your configuration:
+
+```bash
+# Database connection string (Neon PostgreSQL recommended)
+DATABASE_URL=<your-neon-db-url>
+
+# Better Auth configuration
+BETTER_AUTH_SECRET=supersecretpassword
+BETTER_AUTH_URL=http://localhost:3000
+
+# GitHub OAuth App credentials
+GITHUB_CLIENT_ID=<your-github-client-id>
+GITHUB_CLIENT_SECRET=<your-github-client-secret>
+```
+
+### Setting up GitHub OAuth
+
+To enable GitHub authentication:
+
+1. Go to [GitHub Developer Settings](https://github.com/settings/developers)
+2. Click "New OAuth App"
+3. Fill in the application details:
+   - **Application name**: Mórchlár Local
+   - **Homepage URL**: `http://localhost:3000`
+   - **Authorization callback URL**: `http://localhost:3000/api/auth/callback/github`
+4. Click "Register application"
+5. Copy the **Client ID** and generate a **Client Secret**
+6. Add these credentials to your `.env` file
+
+<Note>
+The GitHub OAuth scopes required are `user:email` and `repo` to access user information and repository data.
+</Note>
+
+## Set up the database
+
+Generate and run database migrations:
+
+```bash
+# Generate migrations from schema
+bun run db:generate
+
+# Apply migrations to your database
+bun run db:migrate
+```
+
+This will create all the necessary tables in your PostgreSQL database using Drizzle ORM.
+
+## Run the development server
+
+Start the Nuxt development server:
+
+```bash
+bun run dev
+```
+
+The application will be available at [http://localhost:3000](http://localhost:3000).
+
+## Project structure
+
+Here's an overview of the key directories:
+
+```
+source/
+├── app/                    # Nuxt application code
+│   ├── assets/            # CSS and static assets
+│   ├── components/        # Vue components
+│   ├── composables/       # Vue composables
+│   ├── layouts/           # Layout components
+│   ├── pages/             # Route pages
+│   ├── plugins/           # Nuxt plugins
+│   └── stores/            # Pinia stores
+├── lib/                   # Core library code
+│   ├── auth.ts           # Better Auth configuration
+│   ├── db/               # Database configuration and schema
+│   │   ├── index.ts      # Drizzle DB client
+│   │   ├── queries/      # Database query functions
+│   │   └── schema/       # Drizzle schema definitions
+│   └── env.ts            # Environment variable validation
+├── server/                # Nuxt server code
+│   ├── api/              # API routes
+│   ├── middleware/       # Server middleware
+│   └── utils/            # Server utilities
+└── public/               # Public static files
+```
+
+## Development workflow
+
+### Making database changes
+
+When you modify the database schema:
+
+1. Update the schema files in `lib/db/schema/`
+2. Generate a new migration:
+   ```bash
+   bun run db:generate
+   ```
+3. Apply the migration:
+   ```bash
+   bun run db:migrate
+   ```
+
+### Building for production
+
+Build the application for production:
+
+```bash
+bun run build
+```
+
+### Preview production build
+
+Preview the production build locally:
+
+```bash
+bun run preview
+```
+
+## Common issues
+
+### Database connection errors
+
+If you encounter database connection errors, verify:
+
+- Your `DATABASE_URL` is correct and accessible
+- Your database is running and accepting connections
+- Your IP address is whitelisted (if using Neon or other cloud providers)
+
+### Authentication not working
+
+If GitHub authentication fails:
+
+- Verify your `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` are correct
+- Ensure the callback URL in your GitHub OAuth App matches `http://localhost:3000/api/auth/callback/github`
+- Check that `BETTER_AUTH_URL` matches your development server URL
+
+## Next steps
+
+- Learn about the [system architecture](/development/architecture)
+- Explore the [database schema](/development/database-schema)
+- Review the [contribution guidelines](/development/contributing)

@@ -1,0 +1,130 @@
+---
+title: Deployment overview
+description: Overview of deploying Mórchlár to production
+---
+
+Mórchlár is a Nuxt 4 application with PostgreSQL database integration. This guide covers the requirements and steps for deploying to production.
+
+## Requirements
+
+Before deploying Mórchlár, ensure you have:
+
+- Node.js runtime environment (compatible with Nuxt 4)
+- PostgreSQL database (Neon Database recommended)
+- GitHub OAuth application credentials
+- Domain or hosting platform (Vercel, Netlify, or custom server)
+
+## Technology stack
+
+Mórchlár is built with:
+
+- **Framework**: Nuxt 4.3.1+
+- **Database**: PostgreSQL via Neon Database
+- **ORM**: Drizzle ORM 0.45.1+
+- **Authentication**: Better Auth 1.5.0+ with GitHub OAuth
+- **State Management**: Pinia
+- **GitHub Integration**: Octokit 5.0.5+
+
+## Deployment steps
+
+### 1. Set up database
+
+Create a PostgreSQL database using Neon or another provider. See [Database setup](/deployment/database-setup) for detailed instructions.
+
+### 2. Configure environment variables
+
+Set up all required environment variables in your hosting platform. See [Environment variables](/deployment/environment-variables) for the complete list.
+
+<Warning>
+Never commit your `.env` file to version control. Always use your hosting platform's environment variable configuration.
+</Warning>
+
+### 3. Run database migrations
+
+Before starting the application, run database migrations:
+
+```bash
+bun run db:migrate
+```
+
+See [Database setup](/deployment/database-setup) for migration details.
+
+### 4. Build the application
+
+Build the production bundle:
+
+```bash
+bun run build
+```
+
+### 5. Deploy
+
+Deploy the built application to your hosting platform:
+
+- **Vercel/Netlify**: Connect your repository and configure environment variables
+- **Custom server**: Run `bun run preview` or use a process manager like PM2
+
+## GitHub OAuth setup
+
+Create a GitHub OAuth application:
+
+1. Go to GitHub Settings → Developer settings → OAuth Apps
+2. Click "New OAuth App"
+3. Set **Application name**: Your app name
+4. Set **Homepage URL**: Your production URL
+5. Set **Authorization callback URL**: `{BETTER_AUTH_URL}/api/auth/callback/github`
+6. Save the Client ID and Client Secret for environment variables
+
+<Warning>
+The callback URL must match your `BETTER_AUTH_URL` environment variable exactly, including protocol (https://).
+</Warning>
+
+## Post-deployment verification
+
+After deployment, verify:
+
+1. Application loads correctly at your domain
+2. Database connection is established
+3. GitHub OAuth login works
+4. All features function as expected
+
+## Common deployment platforms
+
+### Vercel (recommended)
+
+1. Import your repository
+2. Configure environment variables
+3. Deploy
+
+Vercel automatically detects Nuxt and configures the build process.
+
+### Netlify
+
+1. Connect your repository
+2. Build command: `bun run build`
+3. Publish directory: `.output/public`
+4. Configure environment variables
+
+### Custom server
+
+For self-hosting:
+
+```bash
+# Build the application
+bun run build
+
+# Start with PM2
+pm2 start .output/server/index.mjs --name morchlár
+```
+
+## Security considerations
+
+<Warning>
+Ensure all environment variables, especially `BETTER_AUTH_SECRET`, `GITHUB_CLIENT_SECRET`, and `DATABASE_URL`, are kept secure and never exposed in client-side code.
+</Warning>
+
+- Use strong, randomly generated secrets
+- Enable HTTPS in production
+- Keep dependencies updated
+- Regularly backup your database
+- Monitor application logs for errors

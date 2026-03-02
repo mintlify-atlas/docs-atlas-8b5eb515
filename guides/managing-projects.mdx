@@ -1,0 +1,427 @@
+---
+title: Managing projects
+description: Create and organize projects linked to GitHub repositories
+---
+
+Projects in Mórchlár represent individual initiatives or codebases within a group. Each project is linked to a GitHub repository and contains tasks that track work over time.
+
+## Understanding projects
+
+A project in Mórchlár:
+- Belongs to a single group
+- Is linked to a GitHub repository
+- Contains a timeline of tasks
+- Stores repository metadata (owner, name, ID)
+- Can be accessed by all group members
+
+<Note>
+Projects are tightly coupled with GitHub repositories. You cannot create a project without linking it to a repository.
+</Note>
+
+## Project structure
+
+Projects are stored with comprehensive repository information:
+
+```typescript lib/db/schema/projects.ts
+export const projects = pgTable("projects", {
+    id: serial("id").primaryKey(),
+    title: text("title").notNull(),
+    groupId: integer("group_id").notNull(),
+    repoId: integer("repo_id").notNull(),
+    repoName: text('repo_name').notNull(),
+    repoOwner: text('repo_owner').notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+        .$onUpdate(() => new Date())
+        .notNull(),
+});
+```
+
+**Field descriptions**:
+- **title**: Display name for the project (can differ from repo name)
+- **groupId**: References the parent group
+- **repoId**: GitHub's numeric repository identifier
+- **repoName**: Repository name (e.g., "my-app")
+- **repoOwner**: Repository owner username or organization
+
+## Creating a project
+
+<Steps>
+  <Step title="Navigate to your group">
+    From the dashboard, click on the group where you want to create a project. This takes you to `/dashboard/group/{groupId}`.
+  </Step>
+
+  <Step title="Click 'Import project from GitHub repo'">
+    On the group's projects page, click the "Import project from GitHub repo" button. This opens a dialog for project creation.
+
+    <Tip>
+    Only group members with developer or owner roles can create projects. Readers have view-only access.
+    </Tip>
+  </Step>
+
+  <Step title="Select a repository">
+    Click the repository dropdown to see all GitHub repositories you have access to. The list includes:
+    - Repository owner's avatar
+    - Full repository path (owner/name)
+    - All repos you can access (personal and organizational)
+
+    ```vue components/Group/RepoSelector.vue
+    <SelectItem
+        v-for="(repo, index) in repos"
+        :key="index"
+        :value="`${repo.owner}/${repo.name}`">
+        <img class="size-4 rounded-full mr-2" :src="repo.icon" />
+        <span>{{ repo.owner }}/{{ repo.name }}</span>
+    </SelectItem>
+    ```
+  </Step>
+
+  <Step title="Enter a project title">
+    The title field auto-populates with the repository name when you select a repo, but you can customize it:
+
+    ```vue app/pages/dashboard/group/[groupId]/index.vue
+    const selectedRepo = ref('');
+    function selectedRepoChanged(value: string) {
+        if (titleChanged.value) return;
+        const name = value.split('/')[1];
+        if (name) {
+            title.value = name;
+        }
+    }
+    ```
+
+    This creates a better user experience - the title automatically matches the repo unless you explicitly change it.
+  </Step>
+
+  <Step title="Import the project">
+    Click "Import" to create the project. The system will:
+    1. Validate your access to the repository
+    2. Fetch repository details from GitHub
+    3. Create the project record
+    4. Link it to the group
+    5. Display it in the projects grid
+  </Step>
+</Steps>
+
+## Project creation flow
+
+### Client-side submission
+
+```vue app/pages/dashboard/group/[groupId]/index.vue
+async function createProject() {
+    if (title.value.length === 0) return;
+    if (selectedRepo.value.length === 0) return;
+
+    if (isNaN(Number(groupId.value))) {
+        throw Error('Invalid groupId when creating project.');
+    }
+
+    const [ repoOwner, repoName ] = selectedRepo.value.split('/');
+    if (!repoOwner || !repoName) return;
+
+    const body: ClientInsertProjectSchema = {
+        groupId: Number(groupId.value),
+        repo: selectedRepo.value,
+        title: title.value,
+        repoOwner,
+        repoName,
+    };
+
+    await $csrfFetch('/api/projects', {
+        method: 'POST',
+        body,
+    });
+
+    refreshProjects();
+}
+```
+
+The client sends:
+- Group ID
+- Repository full path (owner/name)
+- Project title
+- Parsed owner and name
+
+### Server-side validation
+
+```typescript server/api/projects/index.post.ts
+export default defineAuthenticatedEventHandler(async (event) => {
+    const userId = event.context.user.id;
+    const bodyData = await validateBody(event, ClientInsertProject);
+
+    await ensureUserInGroup(userId, bodyData.groupId);
+
+    try {
+        // Validate GitHub repo access
+        const token = await getUserGitHubAuthToken(userId);
+
+        const repoStatus = await verifyGitHubRepoAccess(token, bodyData.repo);
+        if (!repoStatus.valid) {
+            throw createError({
+                statusCode: 400,
+                statusMessage: 'Bad Request',
+                message: 'Invalid repo'
+            });
+        }
+        
+        const createdProjectId = await createProject(
+            repoStatus.id, 
+            repoStatus.name, 
+            repoStatus.owner, 
+            bodyData.title, 
+            bodyData.groupId
+        );
+
+        return { id: createdProjectId };
+    } catch (error) {
+        throw createError({
+            statusCode: 500,
+            statusMessage: 'Internal Server Error',
+        });
+    }
+})
+```
+
+**Server validation steps**:
+1. Authenticate user
+2. Validate request body
+3. Ensure user is a member of the group
+4. Get user's GitHub access token
+5. Verify repository access via GitHub API
+6. Extract repository ID from GitHub
+7. Create project with verified data
+
+<Warning>
+The server re-verifies all repository information with GitHub. Never trust client-supplied repository IDs or details - always validate with the GitHub API.
+</Warning>
+
+## Viewing projects
+
+Projects are displayed in a grid on the group page:
+
+```vue app/pages/dashboard/group/[groupId]/index.vue
+<NuxtLink
+    v-for="project in projects"
+    :key="project.groupId"
+    class="bg-main-800 flex flex-col gap-2 max-h-40 p-4 ring-md rounded-lg hover:bg-main-700"
+    :to="{ name: 'dashboard-group-groupId-project-projectId', params: { groupId, projectId: project.id }  }">
+    <span class="text-lg font-semibold">{{ project.title }}</span>
+</NuxtLink>
+```
+
+Each project card shows:
+- Project title
+- Hover effect for interactivity
+- Link to project detail page
+
+<Tip>
+Projects are displayed in a 4-column grid layout, matching the group grid for visual consistency.
+</Tip>
+
+## Project detail page
+
+Clicking a project navigates to `/dashboard/group/{groupId}/project/{projectId}`, which displays:
+
+### Project header
+
+```vue app/pages/dashboard/group/[groupId]/project/[projectId]/index.vue
+<div v-else class="flex flex-col">
+    <span>Selected project:</span>
+    <h1 class="text-3xl font-bold">{{ projectInfo.title }}</h1>
+    <span class="mt-4">Tasks:</span>
+</div>
+```
+
+### Timeline visualization
+
+The main feature is the interactive timeline showing all tasks:
+
+```vue
+<Timeline
+    :items
+    :groups
+    :initial-viewport-start="bounds.lower"
+    :initial-viewport-end="bounds.upper"
+/>
+```
+
+The timeline:
+- Shows tasks as horizontal bars
+- Displays start and end dates
+- Groups tasks by project
+- Supports zooming and panning
+- Auto-calculates viewport bounds
+
+### Task management
+
+Below the timeline is a "New Task" button for creating tasks. See [Task Timeline guide](/guides/task-timeline) for details.
+
+## Project settings
+
+Projects have a settings page at `/dashboard/group/{groupId}/project/{projectId}/settings` for:
+- Project configuration
+- Repository information
+- Deletion options
+
+<Note>
+Project settings functionality is currently limited. Future versions will add options like renaming, repository re-linking, and member permissions.
+</Note>
+
+## Project navigation
+
+When viewing a project, the sidebar switches to "project" mode:
+
+```vue app/pages/dashboard/group/[groupId]/project/[projectId]/index.vue
+definePageMeta({
+    sidebarType: 'project',
+});
+```
+
+This shows project-specific navigation:
+- Overview / Timeline
+- Settings
+- Back to Group
+
+## Project permissions
+
+Projects inherit permissions from their parent group:
+
+| Action | Owner | Developer | Reader |
+|--------|-------|-----------|--------|
+| View project | ✓ | ✓ | ✓ |
+| View timeline | ✓ | ✓ | ✓ |
+| Create tasks | ✓ | ✓ | ✗ |
+| Edit tasks | ✓ | ✓ | ✗ |
+| Delete tasks | ✓ | ✓ | ✗ |
+| Delete project | ✓ | ✓ | ✗ |
+
+<Tip>
+Readers can view all project information but cannot modify anything. This is ideal for stakeholders, clients, or management who need visibility without edit access.
+</Tip>
+
+## Repository metadata usage
+
+Stored repository data enables several features:
+
+### Constructing GitHub links
+
+```typescript
+const githubUrl = `https://github.com/${project.repoOwner}/${project.repoName}`;
+```
+
+### API calls without re-lookup
+
+```typescript
+const { data } = await octokit.rest.repos.get({
+    owner: project.repoOwner,
+    repo: project.repoName,
+});
+```
+
+### Display information
+
+Show repository details without querying GitHub:
+- "Linked to: owner/repository-name"
+- Repository owner avatar
+- Direct links to issues, PRs, commits
+
+## Project lifecycle
+
+### Creation
+1. User selects group
+2. Chooses repository from GitHub
+3. Customizes project title
+4. Server validates access
+5. Project created and displayed
+
+### Active use
+1. Team members access project
+2. Tasks are created and tracked
+3. Timeline visualizes progress
+4. Repository stays linked
+
+### Deletion
+- Projects can be deleted (UI pending)
+- Cascade deletes all tasks
+- Repository link is removed
+- Group remains intact
+
+<Warning>
+Deleting a project removes all associated tasks. This action is irreversible. Always export task data before deletion.
+</Warning>
+
+## Best practices
+
+### Project titles
+
+- Use descriptive titles that differ from repo names when needed
+- Include version or phase information (e.g., "App v2.0", "Website Redesign")
+- Keep titles concise for UI display
+- Use consistent naming across related projects
+
+### Repository selection
+
+- Link projects to the primary repository
+- For monorepos, create separate projects for different packages if needed
+- Ensure the repository is active and accessible
+- Verify team members have appropriate GitHub access
+
+### Organization
+
+- Create projects for each distinct codebase
+- Use groups to organize related projects
+- Don't create duplicate projects for the same repository
+- Archive or delete unused projects to reduce clutter
+
+## Troubleshooting
+
+### "Invalid repo" error
+
+Causes:
+- Repository doesn't exist
+- User lacks access to the repository
+- Repository is private and OAuth scope is insufficient
+- GitHub API is unavailable
+
+Solutions:
+- Verify repository exists on GitHub
+- Check your access level (must have at least read access)
+- Ensure OAuth includes `repo` scope
+- Try again if GitHub is experiencing issues
+
+### Projects not loading
+
+If projects don't appear:
+- Check browser console for errors
+- Verify you're a member of the group
+- Refresh the page
+- Check network connectivity
+
+### Repository changed name
+
+If a linked repository is renamed on GitHub:
+- Mórchlár still stores the old name
+- Manual update required (database-level)
+- Consider implementing a "re-sync" feature
+
+<Note>
+Repository renames on GitHub don't automatically propagate to Mórchlár. This is a known limitation that may be addressed in future versions with periodic sync.
+</Note>
+
+## Future enhancements
+
+Planned project features include:
+- Project renaming
+- Repository re-linking
+- Project-specific members and permissions
+- Integration with GitHub Issues
+- Automatic task creation from commits
+- Project templates
+- Bulk project import
+
+## Next steps
+
+Now that you understand projects:
+- [Create tasks on the timeline](/guides/task-timeline)
+- [Learn about GitHub integration](/guides/github-integration)
+- [Manage group members](/guides/creating-groups)

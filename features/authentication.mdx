@@ -1,0 +1,181 @@
+---
+title: Authentication
+description: GitHub OAuth authentication with Better Auth
+---
+
+Mórchlár uses GitHub OAuth for authentication, powered by [Better Auth](https://better-auth.com). This provides secure, single sign-on access while also enabling GitHub repository integration for project tracking.
+
+## How authentication works
+
+When users sign in, they authenticate through GitHub OAuth, which grants Mórchlár access to:
+- User profile information (name, email, avatar)
+- Repository access for project integration
+- GitHub API permissions for creating issues and syncing data
+
+### OAuth scopes
+
+The application requests the following GitHub scopes:
+
+```typescript
+socialProviders: {
+    github: {
+        clientId: env.GITHUB_CLIENT_ID,
+        clientSecret: env.GITHUB_CLIENT_SECRET,
+        scope: [ 'user:email', 'repo' ]
+    },
+}
+```
+
+- `user:email` - Access to user email addresses
+- `repo` - Full control of private repositories (required for creating issues and reading repo data)
+
+## User authentication flow
+
+### Signing in
+
+Users can sign in from the landing page by clicking the "Sign in with GitHub" button:
+
+```typescript
+const signInWithGitHub = async () => {
+    await $authClient.signIn.social({
+        provider: 'github',
+        callbackURL: '/dashboard',
+        errorCallbackURL: '/error',
+    });
+};
+```
+
+After successful authentication:
+1. GitHub redirects back to Mórchlár with an authorization code
+2. Better Auth exchanges the code for an access token
+3. User is redirected to `/dashboard`
+4. Session is created and persisted
+
+<Info>
+The GitHub access token is securely stored in the database and used for API requests on behalf of the user.
+</Info>
+
+## Database schema
+
+Mórchlár uses Better Auth's database adapter with custom user fields:
+
+```typescript
+user: {
+    additionalFields: {
+        selectedGroup: {
+            type: 'number',
+            required: false,
+        },
+        selectedProject: {
+            type: 'number',
+            required: false,
+        },
+    },
+}
+```
+
+The user table stores:
+- **id** - Unique user identifier
+- **name** - GitHub display name
+- **email** - Primary email address
+- **image** - GitHub avatar URL
+- **selectedGroup** - Currently active group (for UI state)
+- **selectedProject** - Currently active project (for UI state)
+
+### Session management
+
+Sessions are stored in the database with:
+- Session token
+- Expiration timestamp
+- IP address and user agent for security
+- Reference to user ID
+
+```typescript
+export const session = pgTable(
+    "session",
+    {
+        id: text("id").primaryKey(),
+        expiresAt: timestamp("expires_at").notNull(),
+        token: text("token").notNull().unique(),
+        createdAt: timestamp("created_at").defaultNow().notNull(),
+        updatedAt: timestamp("updated_at")
+            .$onUpdate(() => new Date())
+            .notNull(),
+        ipAddress: text("ip_address"),
+        userAgent: text("user_agent"),
+        userId: text("user_id")
+            .notNull()
+            .references(() => user.id, { onDelete: "cascade" }),
+    },
+    (table) => [index("session_userId_idx").on(table.userId)],
+);
+```
+
+## Protected API routes
+
+Server-side routes are protected using the `defineAuthenticatedEventHandler` utility:
+
+```typescript
+export default defineAuthenticatedEventHandler(async (event) => {
+    const userId = event.context.user.id;
+    // Handler code with authenticated user
+});
+```
+
+This ensures:
+- Valid session exists
+- User is authenticated
+- User data is available in `event.context.user`
+
+<Note>
+All API endpoints that access user data or perform mutations require authentication.
+</Note>
+
+## GitHub token usage
+
+The stored GitHub access token is used for:
+
+### Repository access verification
+
+When creating a project, the token verifies the user has access to the specified repository:
+
+```typescript
+export async function getUserGitHubAuthToken(userId: string) {
+    const token = await auth.api.getAccessToken({
+        body: {
+            providerId: 'github',
+            userId,
+        },
+    });
+
+    return token.accessToken;
+}
+```
+
+### Fetching user repositories
+
+The token retrieves repositories available to the authenticated user:
+
+```typescript
+const token = await getUserGitHubAuthToken(userId);
+const octokit = new Octokit({ auth: token });
+const { data: repos } = await octokit.rest.repos.listForAuthenticatedUser();
+```
+
+<Tip>
+Tokens are automatically refreshed by Better Auth when they expire, ensuring uninterrupted access to GitHub resources.
+</Tip>
+
+## Security considerations
+
+<Accordion title="Session security">
+Sessions are tracked with IP addresses and user agents. The session token is unique and indexed for fast lookups. Sessions automatically cascade delete when a user is removed.
+</Accordion>
+
+<Accordion title="Token storage">
+GitHub access tokens are stored in the `account` table with refresh tokens and expiration timestamps. Tokens are never exposed to the client.
+</Accordion>
+
+<Accordion title="CSRF protection">
+All mutation requests use CSRF-protected fetch (`$csrfFetch`) to prevent cross-site request forgery attacks.
+</Accordion>

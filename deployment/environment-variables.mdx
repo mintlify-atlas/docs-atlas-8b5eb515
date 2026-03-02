@@ -1,0 +1,211 @@
+---
+title: Environment variables
+description: Complete list of environment variables required for Mórchlár
+---
+
+Mórchlár requires several environment variables to function correctly. All variables listed here are mandatory.
+
+## Quick setup
+
+Create a `.env` file in your project root:
+
+```bash
+cp .env.example .env
+```
+
+Then configure each variable with your production values.
+
+<Warning>
+All environment variables listed below are required. The application will fail to start if any are missing.
+</Warning>
+
+## Environment variables
+
+### DATABASE_URL
+
+PostgreSQL database connection string.
+
+```bash
+DATABASE_URL=<your-neon-db-url>
+```
+
+**Format**: `postgresql://[user]:[password]@[host]/[database]?sslmode=require`
+
+**Example**:
+```bash
+DATABASE_URL=postgresql://user:password@ep-example-123456.us-east-2.aws.neon.tech/morchlár?sslmode=require
+```
+
+**Where to get it**:
+- Create a PostgreSQL database on [Neon](https://neon.tech)
+- Copy the connection string from your database dashboard
+- Ensure SSL mode is enabled for production
+
+### BETTER_AUTH_SECRET
+
+Secret key for Better Auth session encryption and token signing.
+
+```bash
+BETTER_AUTH_SECRET=supersecretpassword
+```
+
+**Requirements**:
+- Must be a strong, randomly generated string
+- Minimum 32 characters recommended
+- Keep this secret secure and never commit to version control
+
+**Generate a secure secret**:
+```bash
+openssl rand -base64 32
+```
+
+<Warning>
+Changing this value will invalidate all existing user sessions. Use a strong, unique value and keep it consistent across deployments.
+</Warning>
+
+### BETTER_AUTH_URL
+
+Base URL of your deployed application.
+
+```bash
+BETTER_AUTH_URL=http://localhost:3000
+```
+
+**Development**:
+```bash
+BETTER_AUTH_URL=http://localhost:3000
+```
+
+**Production**:
+```bash
+BETTER_AUTH_URL=https://your-domain.com
+```
+
+**Important**:
+- Must include protocol (http:// or https://)
+- Must match your GitHub OAuth callback URL
+- No trailing slash
+- Use https:// in production
+
+### GITHUB_CLIENT_ID
+
+GitHub OAuth application client ID.
+
+```bash
+GITHUB_CLIENT_ID=<your-github-client-id>
+```
+
+**Where to get it**:
+1. Go to [GitHub Developer Settings](https://github.com/settings/developers)
+2. Click "OAuth Apps" → "New OAuth App"
+3. Fill in application details:
+   - **Application name**: Mórchlár (or your app name)
+   - **Homepage URL**: Your application URL
+   - **Authorization callback URL**: `{BETTER_AUTH_URL}/api/auth/callback/github`
+4. Copy the Client ID
+
+### GITHUB_CLIENT_SECRET
+
+GitHub OAuth application client secret.
+
+```bash
+GITHUB_CLIENT_SECRET=<your-github-client-secret>
+```
+
+**Where to get it**:
+- After creating your GitHub OAuth App, click "Generate a new client secret"
+- Copy the secret immediately (it won't be shown again)
+- Store it securely in your environment variables
+
+<Warning>
+Never expose this secret in client-side code or commit it to version control. Treat it like a password.
+</Warning>
+
+## Environment variable validation
+
+Mórchlár uses Zod schema validation to ensure all required environment variables are present. The validation occurs at application startup.
+
+```typescript
+// From lib/env.ts
+const EnvSchema = z.object({
+    DATABASE_URL: z.string(),
+    BETTER_AUTH_SECRET: z.string(),
+    BETTER_AUTH_URL: z.string(),
+    GITHUB_CLIENT_ID: z.string(),
+    GITHUB_CLIENT_SECRET: z.string(),
+});
+```
+
+If any variable is missing, you'll see an error message:
+
+```
+Missing required values in .env:
+DATABASE_URL
+BETTER_AUTH_SECRET
+```
+
+## Platform-specific configuration
+
+### Vercel
+
+1. Go to Project Settings → Environment Variables
+2. Add each variable with its value
+3. Select appropriate environments (Production, Preview, Development)
+4. Deploy
+
+### Netlify
+
+1. Go to Site Settings → Environment Variables
+2. Add each variable
+3. Redeploy your site
+
+### Docker
+
+Use a `.env` file or pass variables via `-e` flags:
+
+```bash
+docker run -e DATABASE_URL="postgresql://..." \
+  -e BETTER_AUTH_SECRET="..." \
+  -e BETTER_AUTH_URL="https://your-domain.com" \
+  -e GITHUB_CLIENT_ID="..." \
+  -e GITHUB_CLIENT_SECRET="..." \
+  your-image
+```
+
+## Example configuration
+
+Here's a complete `.env.example` file structure:
+
+```bash
+DATABASE_URL=<your-neon-db-url>
+
+BETTER_AUTH_SECRET=supersecretpassword
+BETTER_AUTH_URL=http://localhost:3000
+
+GITHUB_CLIENT_ID=<your-github-client-id>
+GITHUB_CLIENT_SECRET=<your-github-client-secret>
+```
+
+## Troubleshooting
+
+### Application won't start
+
+Check that all variables are set:
+```bash
+echo $DATABASE_URL
+echo $BETTER_AUTH_SECRET
+# etc.
+```
+
+### GitHub OAuth not working
+
+- Verify `BETTER_AUTH_URL` matches your GitHub OAuth callback URL exactly
+- Ensure callback URL is: `{BETTER_AUTH_URL}/api/auth/callback/github`
+- Check that Client ID and Secret are correct
+
+### Database connection errors
+
+- Verify `DATABASE_URL` format is correct
+- Ensure SSL mode is enabled (`?sslmode=require`)
+- Check database is accessible from your hosting environment
+- Confirm database migrations have been run

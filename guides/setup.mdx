@@ -1,0 +1,248 @@
+---
+title: Setup and installation
+description: Complete guide to setting up Mórchlár for your team
+---
+
+This guide walks you through installing and configuring Mórchlár, a collaborative team project tracking platform with GitHub integration.
+
+## Prerequisites
+
+Before you begin, ensure you have the following installed:
+
+- [Bun](https://bun.sh) runtime (v1.0 or higher)
+- [PostgreSQL](https://www.postgresql.org/) database (or a Neon account)
+- A [GitHub OAuth App](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app) for authentication
+
+<Note>
+Mórchlár uses Neon's serverless PostgreSQL in production, but any PostgreSQL database will work for development.
+</Note>
+
+## Installation
+
+<Steps>
+  <Step title="Clone the repository">
+    Clone the Mórchlár repository to your local machine:
+
+    ```bash
+    git clone <repository-url>
+    cd team-project-ca
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    Install all required packages using Bun:
+
+    ```bash
+    bun install
+    ```
+
+    This installs key dependencies including:
+    - **Nuxt 4** - The Vue.js framework
+    - **Drizzle ORM** - Type-safe database access
+    - **Better Auth** - Authentication system
+    - **Octokit** - GitHub API integration
+    - **vue-timeline-chart** - Timeline visualization
+  </Step>
+
+  <Step title="Configure environment variables">
+    Copy the example environment file and configure it:
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    Edit `.env` with your configuration:
+
+    ```bash .env
+    DATABASE_URL=<your-neon-db-url>
+
+    BETTER_AUTH_SECRET=supersecretpassword
+    BETTER_AUTH_URL=http://localhost:3000
+
+    GITHUB_CLIENT_ID=<your-github-client-id>
+    GITHUB_CLIENT_SECRET=<your-github-client-secret>
+    ```
+
+    <Accordion title="Environment variable details">
+      - **DATABASE_URL**: Your PostgreSQL connection string. For Neon, this looks like `postgresql://user:password@host/database`
+      - **BETTER_AUTH_SECRET**: A secure random string for session encryption. Generate one with `openssl rand -base64 32`
+      - **BETTER_AUTH_URL**: The base URL of your application (use `http://localhost:3000` for development)
+      - **GITHUB_CLIENT_ID**: OAuth App client ID from GitHub
+      - **GITHUB_CLIENT_SECRET**: OAuth App client secret from GitHub
+    </Accordion>
+  </Step>
+
+  <Step title="Set up GitHub OAuth App">
+    Create a GitHub OAuth App to enable authentication:
+
+    1. Go to [GitHub Developer Settings](https://github.com/settings/developers)
+    2. Click "New OAuth App"
+    3. Configure the application:
+       - **Application name**: Mórchlár (or your preferred name)
+       - **Homepage URL**: `http://localhost:3000`
+       - **Authorization callback URL**: `http://localhost:3000/api/auth/callback/github`
+    4. Click "Register application"
+    5. Copy the **Client ID** and generate a **Client Secret**
+    6. Add these to your `.env` file
+
+    <Warning>
+    The GitHub OAuth App must request the following scopes:
+    - `user:email` - Access user email addresses
+    - `repo` - Full control of repositories (required for issue tracking)
+
+    These scopes are configured in `/lib/auth.ts` and are essential for Mórchlár's GitHub integration features.
+    </Warning>
+  </Step>
+
+  <Step title="Set up the database">
+    Generate and run database migrations:
+
+    ```bash
+    # Generate migration files from schema
+    bun run db:generate
+
+    # Apply migrations to database
+    bun run db:migrate
+    ```
+
+    This creates all necessary tables including:
+    - `groups` - Team groups
+    - `groupMembers` - Group membership with roles
+    - `projects` - Projects linked to GitHub repositories
+    - `tasks` - Timeline-based tasks
+    - Authentication tables (user, session, account)
+  </Step>
+
+  <Step title="Start the development server">
+    Launch the application:
+
+    ```bash
+    bun run dev
+    ```
+
+    The application will be available at `http://localhost:3000`
+  </Step>
+</Steps>
+
+## Database schema overview
+
+Mórchlár uses Drizzle ORM with PostgreSQL. The main tables are:
+
+### Groups table
+
+```typescript lib/db/schema/groups.ts
+export const groups = pgTable("groups", {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    slug: text("slug").notNull().unique(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+        .$onUpdate(() => new Date())
+        .notNull(),
+});
+```
+
+### Projects table
+
+```typescript lib/db/schema/projects.ts
+export const projects = pgTable("projects", {
+    id: serial("id").primaryKey(),
+    title: text("title").notNull(),
+    groupId: integer("group_id").notNull(),
+    repoId: integer("repo_id").notNull(),
+    repoName: text('repo_name').notNull(),
+    repoOwner: text('repo_owner').notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+        .$onUpdate(() => new Date())
+        .notNull(),
+});
+```
+
+### Tasks table
+
+```typescript lib/db/schema/tasks.ts
+export const tasks = pgTable("tasks", {
+    id: serial("id").primaryKey(),
+    title: text("title").notNull(),
+    description: text("description"),
+    projectId: integer('project_id').references(() => projects.id, { onDelete: 'cascade' }).notNull(),
+    parentId: integer('parent_id').references((): AnyPgColumn => tasks.id, { onDelete: 'cascade' }),
+    startTime: timestamp('start_time').notNull(),
+    endTime: timestamp('end_time').notNull(),
+    progress: real('progress').default(0), // 0.00 to 1.00
+    order: integer('order').default(0),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+        .$onUpdate(() => new Date())
+        .notNull(),
+});
+```
+
+## Verification
+
+After completing setup, verify everything works:
+
+1. Navigate to `http://localhost:3000`
+2. Click "Sign in with GitHub"
+3. Authorize the OAuth application
+4. You should be redirected to the dashboard
+
+<Tip>
+If you encounter database connection errors, verify your `DATABASE_URL` is correct and the database is accessible. Use `psql` to test the connection manually.
+</Tip>
+
+## Production deployment
+
+For production deployment:
+
+```bash
+# Build the application
+bun run build
+
+# Preview the production build locally
+bun run preview
+```
+
+<Warning>
+Before deploying to production:
+- Update `BETTER_AUTH_URL` to your production domain
+- Generate a strong `BETTER_AUTH_SECRET`
+- Update GitHub OAuth App callback URL to your production domain
+- Ensure your database has proper backups configured
+</Warning>
+
+## Troubleshooting
+
+### Database migration errors
+
+If migrations fail, check:
+- Database connection string is correct
+- Database user has CREATE TABLE permissions
+- No conflicting tables exist
+
+### GitHub authentication issues
+
+If OAuth fails:
+- Verify client ID and secret are correct
+- Check callback URL matches exactly
+- Ensure scopes include `user:email` and `repo`
+
+### Port conflicts
+
+If port 3000 is in use:
+```bash
+# Use a different port
+PORT=3001 bun run dev
+```
+
+Update `BETTER_AUTH_URL` accordingly.
+
+## Next steps
+
+Now that Mórchlár is set up:
+
+- [Integrate with GitHub repositories](/guides/github-integration)
+- [Create your first group](/guides/creating-groups)
+- [Set up a project](/guides/managing-projects)
+- [Start tracking tasks](/guides/task-timeline)

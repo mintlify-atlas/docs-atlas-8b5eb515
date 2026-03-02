@@ -1,0 +1,293 @@
+---
+title: Database setup
+description: Set up PostgreSQL database and run migrations for Mórchlár
+---
+
+Mórchlár uses PostgreSQL as its database, managed with Drizzle ORM. This guide covers database setup, schema management, and migrations.
+
+## Database provider
+
+### Neon Database (recommended)
+
+Neon provides serverless PostgreSQL with excellent performance and easy setup:
+
+1. Create account at [neon.tech](https://neon.tech)
+2. Create a new project
+3. Copy the connection string
+4. Add to your environment variables as `DATABASE_URL`
+
+### Other PostgreSQL providers
+
+Mórchlár works with any PostgreSQL provider:
+
+- **Supabase**: Full-featured PostgreSQL with additional tools
+- **Railway**: Simple deployment with built-in PostgreSQL
+- **AWS RDS**: Enterprise-grade managed PostgreSQL
+- **Self-hosted**: Any PostgreSQL 12+ instance
+
+<Warning>
+Ensure your PostgreSQL instance supports SSL connections for production deployments.
+</Warning>
+
+## Database configuration
+
+Mórchlár's database configuration is defined in `drizzle.config.ts`:
+
+```typescript
+import { defineConfig } from 'drizzle-kit';
+import env from "./lib/env";
+
+export default defineConfig({
+    out: './lib/db/migrations',
+    schema: './lib/db/schema',
+    casing: 'snake_case',
+    dialect: 'postgresql',
+    dbCredentials: {
+        url: env.DATABASE_URL,
+    },
+});
+```
+
+**Key settings**:
+- **Migrations directory**: `./lib/db/migrations`
+- **Schema directory**: `./lib/db/schema`
+- **Naming convention**: `snake_case` for database columns
+- **Dialect**: PostgreSQL
+
+## Database schema
+
+The database schema includes the following tables:
+
+### Authentication tables
+
+- **user**: User accounts and profiles
+- **session**: Active user sessions
+- **account**: OAuth provider accounts (GitHub)
+- **verification**: Email/account verification tokens
+
+### Application tables
+
+- **groups**: Team groups for collaboration
+- **group_members**: Group membership and roles
+- **projects**: Team projects with GitHub integration
+- **tasks**: Project tasks and tracking
+
+Schema definitions are located in `lib/db/schema/`:
+- `auth.ts` - Authentication tables
+- `groups.ts` - Group management
+- `groupMembers.ts` - Group membership
+- `projects.ts` - Project data
+- `tasks.ts` - Task tracking
+
+## Running migrations
+
+Migrations are managed using Drizzle Kit. All migration files are stored in `lib/db/migrations/`.
+
+### Initial setup
+
+Before running your application for the first time:
+
+```bash
+bun run db:migrate
+```
+
+This applies all pending migrations to your database.
+
+<Warning>
+Always run migrations before starting your application in production. The application expects the database schema to be up to date.
+</Warning>
+
+### Available commands
+
+From `package.json`:
+
+```bash
+# Generate new migration files from schema changes
+bun run db:generate
+
+# Apply pending migrations to database
+bun run db:migrate
+```
+
+### Migration workflow
+
+**During development**:
+
+1. Modify schema files in `lib/db/schema/`
+2. Generate migration:
+   ```bash
+   bun run db:generate
+   ```
+3. Review generated SQL in `lib/db/migrations/`
+4. Apply migration:
+   ```bash
+   bun run db:migrate
+   ```
+
+**During deployment**:
+
+1. Ensure all migrations are committed to version control
+2. Deploy code with new migrations
+3. Run migrations before starting the application:
+   ```bash
+   bun run db:migrate
+   ```
+
+## Migration history
+
+Mórchlár has the following migrations (in order):
+
+1. `0000_init.sql` - Initial database setup
+2. `0001_auth.sql` - Authentication tables
+3. `0002_projects.sql` - Project management
+4. `0003_groups.sql` - Group collaboration
+5. `0004_project_and_tasks.sql` - Project and task integration
+6. `0005_user_selected_project.sql` - User project selection
+7. `0006_task_project_not_null.sql` - Task constraints
+8. `0007_end_time_typo.sql` - Schema fixes
+9. `0008_repo_name_owner_in_project.sql` - GitHub integration fields
+10. `0009_fix_repo_cols.sql` - Repository column fixes
+
+## Production deployment
+
+### Pre-deployment checklist
+
+- [ ] Database created and accessible
+- [ ] `DATABASE_URL` environment variable set
+- [ ] SSL enabled on database connection
+- [ ] All migrations tested in staging environment
+
+### Deployment steps
+
+1. **Set up database connection**:
+   ```bash
+   # Add to your environment
+   DATABASE_URL=postgresql://user:password@host/database?sslmode=require
+   ```
+
+2. **Run migrations**:
+   ```bash
+   bun run db:migrate
+   ```
+
+3. **Verify migration success**:
+   - Check application logs for errors
+   - Verify tables exist in database
+   - Test application functionality
+
+<Warning>
+Always backup your production database before running migrations. While migrations are designed to be safe, backups provide an extra layer of protection.
+</Warning>
+
+## Database connection
+
+Mórchlár uses Neon's serverless driver for optimal performance:
+
+```typescript
+import { neon } from '@neondatabase/serverless';
+import { drizzle } from 'drizzle-orm/neon-http';
+```
+
+**Benefits**:
+- Automatic connection pooling
+- Serverless-optimized
+- Low latency
+- HTTP-based (works in edge environments)
+
+## Troubleshooting
+
+### Migration fails to run
+
+**Check database connection**:
+```bash
+# Test connection string
+psql $DATABASE_URL -c "SELECT version();"
+```
+
+**Common issues**:
+- Invalid `DATABASE_URL` format
+- Database not accessible from deployment environment
+- Missing SSL configuration
+- Insufficient database permissions
+
+### Schema drift
+
+If your database schema doesn't match your code:
+
+1. Generate a new migration:
+   ```bash
+   bun run db:generate
+   ```
+2. Review the generated SQL
+3. Apply the migration:
+   ```bash
+   bun run db:migrate
+   ```
+
+### Connection pool errors
+
+If you see connection pool errors:
+- Check your database plan's connection limits
+- Verify your application isn't creating excessive connections
+- Consider upgrading your database plan
+
+### Rolling back migrations
+
+Drizzle doesn't have automatic rollback. To revert:
+
+1. **Restore from backup** (recommended)
+2. **Manual rollback**: Write SQL to reverse migration changes
+3. **Re-deploy**: Deploy previous application version
+
+## Best practices
+
+### Development
+
+- Use a separate database for development and testing
+- Test migrations in a staging environment before production
+- Keep migration files in version control
+- Never edit existing migration files after deployment
+
+### Production
+
+- Always backup before migrations
+- Run migrations during low-traffic periods
+- Monitor application after migration deployment
+- Keep database credentials secure
+- Enable connection pooling for better performance
+
+### Security
+
+- Use SSL for all database connections
+- Restrict database access to application servers only
+- Use strong database passwords
+- Regularly update database engine version
+- Enable database audit logging
+
+## Connection string format
+
+PostgreSQL connection string structure:
+
+```
+postgresql://[user]:[password]@[host]:[port]/[database]?[parameters]
+```
+
+**Example with Neon**:
+```
+postgresql://user:password@ep-example-123456.us-east-2.aws.neon.tech:5432/morchlár?sslmode=require
+```
+
+**Required parameters**:
+- `sslmode=require` - Force SSL connection (production)
+
+## Database monitoring
+
+Monitor these metrics in production:
+
+- Connection pool utilization
+- Query performance
+- Database size and growth
+- Failed connection attempts
+- Slow queries
+
+Most PostgreSQL providers offer built-in monitoring dashboards.
