@@ -17,9 +17,7 @@ curl -X POST https://your-domain.com/api/projects \
   -d '{
     "title": "Website Redesign",
     "groupId": 1,
-    "repo": "owner/repository-name",
-    "repoName": "repository-name",
-    "repoOwner": "owner"
+    "repo": "owner/repository-name"
   }'
 ```
 
@@ -30,7 +28,7 @@ curl -X POST https://your-domain.com/api/projects \
 ```
 </CodeGroup>
 
-Creates a new project and links it to a GitHub repository. The repository is validated to ensure the authenticated user has access.
+Creates a new project and links it to a GitHub repository. The repository is validated to ensure the authenticated user has access. The server automatically extracts repository metadata (ID, name, owner) from GitHub.
 
 ### Request body
 
@@ -43,15 +41,7 @@ Creates a new project and links it to a GitHub repository. The repository is val
 </ParamField>
 
 <ParamField body="repo" type="string" required>
-  The GitHub repository in `owner/name` format (e.g., `octocat/hello-world`). Used to verify repository access.
-</ParamField>
-
-<ParamField body="repoName" type="string" required>
-  The name of the GitHub repository.
-</ParamField>
-
-<ParamField body="repoOwner" type="string" required>
-  The owner (user or organization) of the GitHub repository.
+  The GitHub repository in `owner/name` format (e.g., `octocat/hello-world`). The server verifies repository access and automatically extracts the repository ID, name, and owner.
 </ParamField>
 
 ### Response
